@@ -94,6 +94,15 @@ When this function is run, the following files are copied.
 - "A2A server 3_Google Calendar Manager Agent"
 - "A2A server 4_APIs Manager Agent"
 
+
+### Use A2AApp as a GAS library
+
+If you want to use A2AApp as a GAS library, the library key is as follows.
+
+```
+1OuHIiA5Ge0MG_SpKdv1JLz8ZS3ouqhvrF5J6gRRr6xFiFPHxkRsgjMI6
+```
+
 ## 2. Setting
 
 
