@@ -3,8 +3,8 @@
  * This is used for building both an Agent2Agent (A2A) server and an A2A client with Google Apps Script.
  * 
  * Author: Kanshi Tanaike
- * 20250619 10:15
- * version 2.0.3
+ * 20251216 16:30
+ * version 2.0.4
  * @class
  */
 class A2AApp {
@@ -22,7 +22,7 @@ class A2AApp {
     this.accessKey = accessKey;
 
     /** @private */
-    this.model = "models/gemini-2.0-flash"; // or "models/gemini-2.5-flash-preview-04-17"
+    this.model = "models/gemini-2.5-flash";
 
     /** @private */
     this.jsonrpc = "2.0";
@@ -274,7 +274,7 @@ class A2AApp {
   createResponse_(object) {
     const { eventObject, apiKey, agentCard, functions, agentCards = [], agentCardUrls = [], obj, id } = object;
     const { pathInfo } = eventObject;
-    if (pathInfo == ".well-known/agent.json") {
+    if (pathInfo == ".well-known/agent.json" || pathInfo == ".well-known/agent-card.json") {
       if (!agentCard || typeof agentCard != "function") {
         throw new Error("Agent card was not found.");
       }
@@ -646,9 +646,11 @@ class A2AApp {
       const { url, queryParameters } = this.parseQueryParameters_(u);
       const path = url.split("/").pop();
       if (["exec", "dev"].includes(path)) { // <--- For Web Apps created by Google Apps Script
-        return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent.json`, queryParameters || {}), headers: this.headers, muteHttpExceptions: true };
+        return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent-card.json`, queryParameters || {}), headers: this.headers, muteHttpExceptions: true }; // for v0.3.0
+        // return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent.json`, queryParameters || {}), headers: this.headers, muteHttpExceptions: true };
       }
-      return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent.json`, queryParameters || {}), muteHttpExceptions: true };
+      return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent-card.json`, queryParameters || {}), muteHttpExceptions: true }; // for v0.3.0
+      // return { url: this.addQueryParameters_(`${url.trim()}/.well-known/agent.json`, queryParameters || {}), muteHttpExceptions: true };
     });
     const ress = this.fetchAllWithLimitations_(callAgentCardUrls);
     const agentCards = ress.reduce((ar, res, i) => {

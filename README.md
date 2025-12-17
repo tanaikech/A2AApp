@@ -402,5 +402,9 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 
   1. A bug was removed.
 
+- v2.0.4 (December 17, 2025)
+
+  1. Updated A2AApp for A2A Protocol v0.3.0.
+
 [TOP](#top)
 
