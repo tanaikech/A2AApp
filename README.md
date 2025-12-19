@@ -415,5 +415,9 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 
   1. Updated A2AApp for A2A Protocol v0.3.0.
 
+- v2.1.0 (December 19, 2025)
+
+  1. Refactored A2AApp.
+
 [TOP](#top)
 
