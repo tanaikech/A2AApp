@@ -7,7 +7,6 @@ Enabling Collaborative Agent Systems through Google Apps Script-based Agent2Agen
 
 <a name="overview"></a>
 
-
 ![](images/fig1.jpg)
 
 # Overview
@@ -24,13 +23,13 @@ The implementation leverages Google Apps Script to establish a decentralized and
 
 Here are the advantages of using an A2A (Agent-to-Agent) server and client with Google Apps Script:
 
-* **Integration with Google Workspace**: It allows direct management of active Google Docs and Sheets when using the A2A client.
-* **Seamless Integration with Google Resources**: Effortlessly connects with Google services like Google APIs, Docs, Sheets, Slides, Gmail, and Calendar, leveraging secure authorization scopes.
-* **Enhanced Security via Access Tokens**: Simplifies access token acquisition for Web Apps, eliminating the need for temporary token inclusion in Python client queries for agent card retrieval.
-* **Improved User Restriction**: Web Apps can be restricted to specific users, increasing security.
-* **Automated Script Execution**: Supports automatic script execution via triggers, beneficial for client-side operations. This client can interact with various A2A servers (Google Apps Script, Python, Node.js, etc.).
-* **Easy Deployment**: Web Apps can be readily deployed as A2A servers, accessible by various A2A clients (Google Apps Script, Python, Node.js, etc.).
-* **Decentralized Agent Communication**: Enables direct communication between AI agents, fostering a decentralized AI ecosystem.
+- **Integration with Google Workspace**: It allows direct management of active Google Docs and Sheets when using the A2A client.
+- **Seamless Integration with Google Resources**: Effortlessly connects with Google services like Google APIs, Docs, Sheets, Slides, Gmail, and Calendar, leveraging secure authorization scopes.
+- **Enhanced Security via Access Tokens**: Simplifies access token acquisition for Web Apps, eliminating the need for temporary token inclusion in Python client queries for agent card retrieval.
+- **Improved User Restriction**: Web Apps can be restricted to specific users, increasing security.
+- **Automated Script Execution**: Supports automatic script execution via triggers, beneficial for client-side operations. This client can interact with various A2A servers (Google Apps Script, Python, Node.js, etc.).
+- **Easy Deployment**: Web Apps can be readily deployed as A2A servers, accessible by various A2A clients (Google Apps Script, Python, Node.js, etc.).
+- **Decentralized Agent Communication**: Enables direct communication between AI agents, fostering a decentralized AI ecosystem.
 
 # Repository
 
@@ -39,7 +38,6 @@ Here are the advantages of using an A2A (Agent-to-Agent) server and client with 
 # Usage
 
 Here, the following sample is used for testing.
-
 
 ![](images/fig2.jpg)
 
@@ -71,17 +69,23 @@ function myFunction() {
   ];
 
   const folder = DriveApp.getFolderById(dstFolderId);
-  const headers = { authorization: "Bearer " + ScriptApp.getOAuthToken(), "Content-Type": "application/json" };
-  const reqs = fileIds.map(fileId => ({
+  const headers = {
+    authorization: "Bearer " + ScriptApp.getOAuthToken(),
+    "Content-Type": "application/json",
+  };
+  const reqs = fileIds.map((fileId) => ({
     url: `https://www.googleapis.com/drive/v3/files/${fileId}/copy`,
     headers,
-    payload: JSON.stringify({ parents: [dstFolderId], name: DriveApp.getFileById(fileId).getName() })
+    payload: JSON.stringify({
+      parents: [dstFolderId],
+      name: DriveApp.getFileById(fileId).getName(),
+    }),
   }));
-  UrlFetchApp.fetchAll(reqs).forEach(res => {
+  UrlFetchApp.fetchAll(reqs).forEach((res) => {
     const { id } = JSON.parse(res.getContentText());
     DriveApp.getFileById(id).moveTo(folder);
   });
-  
+
   //  If an error is related to Drive API, please enable Drive API v3 at Advanced Google services.
 }
 ```
@@ -94,7 +98,6 @@ When this function is run, the following files are copied.
 - "A2A server 3_Google Calendar Manager Agent"
 - "A2A server 4_APIs Manager Agent"
 
-
 ### Use A2AApp as a GAS library
 
 If you want to use A2AApp as a GAS library, the library key is as follows.
@@ -104,7 +107,6 @@ If you want to use A2AApp as a GAS library, the library key is as follows.
 ```
 
 ## 2. Setting
-
 
 ### 1. A2A servers
 
@@ -149,9 +151,11 @@ Open the Google Spreadsheet of "A2A client", and open the script editor of Googl
 Please set your Web Apps URLs for 4 A2A servers to `agentCardUrls`. And, save the script. In this sample, 4 Web Apps URLs are set.
 
 ## 3. Testing
+
 Please reopen the Google Spreadsheet of the A2A client. By this, you can see the custom menu `Run`. Please run `Open sidebar`. When you see the authorization dialog open, please authorize all scopes. By this, the sidebar is opened. When the above steps were correctly done, you can test it. The demonstration of this is as follows.
 
 ### Sample 1
+
 In the 1st sample, the active Spreadsheet is used.
 
 ![](images/fig3.gif)
@@ -169,6 +173,7 @@ Response: The active cell is A5 in Sheet1 of the spreadsheet with ID ###. The va
 The information of the active cell is retrieved on the A2A client, and the information is used in the A2A server (Google Sheets Manager Agent). This result indicates the advantage of using the A2A client built by Google Apps Script.
 
 ### Sample 2
+
 In the 2nd sample, image data is retrieved from Google Drive.
 
 ![](images/fig4.gif)
@@ -177,6 +182,7 @@ Prompt: **Show the image of CherryBlossom from Google Drive.**
 Response: **OK. I have downloaded the image \"CherryBlossom.png\" from Google Drive.**
 
 ### Sample 3
+
 In the 3rd sample, multiple agents are used.
 
 ![](images/fig5.gif)
@@ -187,12 +193,12 @@ Response: **OK. Here's a summary based on your question and the provided answers
 
 This process automatically creates an event in Google Calendar as follows.
 
-
 ![](images/fig6.png)
 
 In this case, this response was created using "create_schedule_to_Google_Calendar" of "Google Calendar Manager Agent" and "get_exchange_rate" and "get_current_weather" of "APIs Manager Agent" together with the A2A client. Also, an event was automatically created in Google Calendar. From this result, you can confirm that AI agents are working together.
 
 ### Options
+
 A2AApp has the following options.
 
 - In the case of `Execute as: Me` and `Who has access to the app: Anyone` for Web Apps, anyone can access. To enhance security, an access key can be used. When using the access key, please set it as follows: `return new A2AApp({accessKey: "sample"}).server(object);`. Additionally, please add it as a query parameter to the Web App URL as follows: `https://script.google.com/macros/s/###/exec?accessKey=sample` and `https://script.google.com/macros/s/###/dev?access_token=###&accessKey=sample`.
@@ -391,33 +397,28 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 # Update History
 
 - v1.0.0 (May 16, 2025)
-
   1. Initial release.
 
 - v2.0.0 (May 28, 2025)
-
   1. Updated A2A server.
   2. Added A2A client.
 
 - v2.0.1 (May 29, 2025)
-
   1. From v2.0.1, A2AApp can also be used as a library. [Ref](https://github.com/tanaikech/A2AApp/tree/master/Use_A2AApp_as_library)
 
 - v2.0.2 (June 18, 2025)
-
   1. A bug was removed.
 
 - v2.0.3 (June 19, 2025)
-
   1. A bug was removed.
 
 - v2.0.4 (December 17, 2025)
-
   1. Updated A2AApp for A2A Protocol v0.3.0.
 
 - v2.1.0 (December 19, 2025)
+  1. Refactored A2AApp.
 
+- v2.1.2 (May 9, 2026)
   1. Refactored A2AApp.
 
 [TOP](#top)
-
