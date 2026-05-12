@@ -421,4 +421,7 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 - v2.1.2 (May 9, 2026)
   1. Refactored A2AApp.
 
+- v2.1.3 (May 12, 2026)
+  1. Modified.
+
 [TOP](#top)

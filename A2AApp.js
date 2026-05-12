@@ -17,11 +17,11 @@ const toLog_ = (kind, text) => {
  * This is used for building both an Agent2Agent (A2A) server and an A2A client with Google Apps Script.
  *
  * Author: Kanshi Tanaike
- * Version: 2.1.2
- * 20260509 15:26
+ * Version: 2.1.3
+ * 20260512 12:00
  * @class
  */
-class A2AApp {
+var A2AApp = class A2AApp {
   /**
    * @param {Object} object Configuration object.
    * @param {String} [object.accessKey] Access key for A2A server (optional).
@@ -1089,4 +1089,4 @@ class A2AApp {
       ? `${url}&${queryString}`
       : `${url}?${queryString}`;
   }
-}
+};
