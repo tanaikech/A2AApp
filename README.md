@@ -424,4 +424,7 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 - v2.1.3 (May 12, 2026)
   1. Modified.
 
+- v2.2.0 (May 15, 2026)
+  1. Several bugs were removed.
+
 [TOP](#top)

@@ -15,10 +15,22 @@ const toLog_ = (kind, text) => {
 /**
  * Class object for A2AApp.
  * This is used for building both an Agent2Agent (A2A) server and an A2A client with Google Apps Script.
+ * 
+ * ### Important Note
+ * If this script is used as a server (Web App), you MUST create a "New Deployment" 
+ * after updating the code. Otherwise, the old cached script will be executed.
+ * 
+ * ### Execution Phases Logged:
+ * - [Phase 1: Concurrency Control] LockService limits concurrent overlaps.
+ * - [Phase 2: Agent Discovery] Retrieving `.well-known/agent-card.json`.
+ * - [Phase 3: Tool Proxying] Dynamic schema conversion to Function Calling formats.
+ * - [Phase 4: Planning] Gemini acts as a delegator to determine sequential routing.
+ * - [Phase 5: Sequential Execution] Executing functions sequentially with forced routing.
+ * - [Phase 6: Data Materialization] Isolating textual output from file blobs.
+ * - [Phase 7: Final Synthesis] Generating the ultimate summarized response.
  *
  * Author: Kanshi Tanaike
- * Version: 2.1.3
- * 20260512 12:00
+ * Version: 2.2.0
  * @class
  */
 var A2AApp = class A2AApp {
@@ -49,6 +61,9 @@ var A2AApp = class A2AApp {
 
     /** @private */
     this.log = log;
+    
+    /** @private Context flag to dynamically adjust log direction values ("server" or "client") */
+    this.contextType = "unknown";
 
     if (this.log) {
       const ss = spreadsheetId
@@ -140,28 +155,30 @@ var A2AApp = class A2AApp {
    * @return {ContentService.TextOutput}
    */
   server(object = {}) {
-    console.log("Server side");
+    this.contextType = "server";
+    console.log("--- Server side initialized");
     this.errorProcess_(object);
     let id = "No ID";
     const lock = this.lock;
 
-    // Server-side locking to prevent race conditions
+    // [Phase 1: Concurrency Control] Server-side locking to prevent race conditions
     if (!lock.tryLock(350000)) {
-      const msg = "Timeout.";
+      const msg = "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
       console.error(msg);
       return this.createErrorResponse_(
         `Internal server error. Error message: ${msg}`,
         id,
-        null,
+        "[Phase 1: Concurrency Control]"
       );
     }
+    this.addLog_(new Date(), "[Phase 1: Concurrency Control]", id, "server internal", "Lock acquired successfully.");
 
     try {
       const { eventObject, agentCardUrls = [], agentCards = [] } = object;
       const obj = eventObject.postData ? this.parseObj_(eventObject) : {};
       id = obj.id || "No ID";
 
-      // Handle Agent Card retrieval logic
+      // [Phase 2: Agent Discovery] Handle Agent Card retrieval logic internally if URLs provided
       if (agentCards.length === 0 && agentCardUrls.length > 0) {
         object.agentCards = this.getAgentCards(agentCardUrls);
       }
@@ -174,7 +191,7 @@ var A2AApp = class A2AApp {
       return this.createErrorResponse_(
         `Internal server error. Error message: ${err.stack}`,
         id,
-        null,
+        "Server Main Process"
       );
     } finally {
       lock.releaseLock();
@@ -188,28 +205,25 @@ var A2AApp = class A2AApp {
    * @return {Object} Result object including result, history, and agentCards.
    */
   client(object = {}) {
-    console.log("Client side");
+    this.contextType = "client";
+    console.log("--- Client side initialized");
     const lock = this.lock;
 
-    // Client-side locking
+    // [Phase 1: Concurrency Control] Client-side locking
     if (!lock.tryLock(350000)) {
-      const msg = "Timeout.";
+      const msg = "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
       console.error(msg);
       const errObj = {
         error: { message: `Internal server error. Error message: ${msg}` },
       };
-      this.addLog_(
-        this.date,
-        null,
-        null,
-        "client side",
-        JSON.stringify(errObj),
-      );
+      this.addLog_(new Date(), "[Phase 1: Concurrency Control]", null, "client internal", JSON.stringify(errObj));
       this.log_();
       return errObj;
     }
+    this.addLog_(new Date(), "[Phase 1: Concurrency Control]", null, "client internal", "Lock acquired successfully.");
 
     try {
+      // [Phase 2: Agent Discovery] Fetch Agent Cards
       const { agentCardUrls = [], agentCards = [] } = object;
       if (agentCards.length === 0 && agentCardUrls.length > 0) {
         object.agentCards = this.getAgentCards(agentCardUrls);
@@ -225,13 +239,7 @@ var A2AApp = class A2AApp {
           message: `Internal server error. Error message: ${err.stack}`,
         },
       };
-      this.addLog_(
-        this.date,
-        null,
-        null,
-        "client side",
-        JSON.stringify(errObj),
-      );
+      this.addLog_(new Date(), "Client Main Process", null, "client internal", JSON.stringify(errObj));
       this.log_();
       return errObj;
     } finally {
@@ -256,9 +264,9 @@ var A2AApp = class A2AApp {
    * Helper: Add log entries to the queue seamlessly.
    * @private
    */
-  addLog_(date, method, id, direction, message) {
+  addLog_(date, phaseOrMethod, id, direction, message) {
     if (this.log) {
-      this.values.push([date, method, id, direction, message]);
+      this.values.push([date, phaseOrMethod || "", id || "", direction || "", message]);
     }
   }
 
@@ -266,19 +274,13 @@ var A2AApp = class A2AApp {
    * Helper: Create formatted Server Error Response.
    * @private
    */
-  createErrorResponse_(message, id, method) {
+  createErrorResponse_(message, id, phaseOrMethod) {
     const errObj = {
       jsonrpc: this.jsonrpc,
       error: { code: this.ErrorCode["Internal server error"], message },
       id,
     };
-    this.addLog_(
-      this.date,
-      method,
-      id,
-      "server --> client",
-      JSON.stringify(errObj),
-    );
+    this.addLog_(new Date(), phaseOrMethod || "Error Response", id, "server --> client", JSON.stringify(errObj));
     this.log_();
     return this.createContent_(errObj);
   }
@@ -299,11 +301,12 @@ var A2AApp = class A2AApp {
     } = object;
     const { pathInfo, parameter } = eventObject;
 
-    // 1. Handle Discovery (Agent Card)
+    // [Phase 2: Agent Discovery] Handle Discovery (Agent Card request from client)
     if (
       pathInfo === ".well-known/agent.json" ||
       pathInfo === ".well-known/agent-card.json"
     ) {
+      this.addLog_(new Date(), "[Phase 2: Agent Discovery]", id, "client --> server", "Received request for Agent Card.");
       if (typeof agentCard !== "function") {
         throw new Error("Agent card was not found or is not a function.");
       }
@@ -335,48 +338,34 @@ var A2AApp = class A2AApp {
         ...new Set(agentCardObj.defaultOutputModes),
       ];
 
-      this.addLog_(
-        this.date,
-        null,
-        id,
-        "server --> client",
-        JSON.stringify(agentCardObj),
-      );
+      this.addLog_(new Date(), "[Phase 2: Agent Discovery]", id, "server --> client", JSON.stringify(agentCardObj));
       return this.createContent_(agentCardObj);
     }
 
     if (!obj.method) return null;
     const method = obj.method.toLowerCase();
-    this.addLog_(
-      this.date,
-      method,
-      id,
-      "client --> server",
-      JSON.stringify(obj),
-    );
+    
+    // Log incoming payload as client --> server
+    this.addLog_(new Date(), `RPC Method: ${method}`, id, "client --> server", JSON.stringify(obj));
 
     // 2. Authentication Check
     if (this.accessKey && parameter.accessKey !== this.accessKey) {
-      this.addLog_(this.date, method, id, "At server", "Invalid accessKey.");
+      const errMsg = "Invalid accessKey.";
+      console.warn(`--- Server Auth Error: ${errMsg}`);
+      this.addLog_(new Date(), "Authentication", id, "server internal", errMsg);
       const errObj = {
         jsonrpc: this.jsonrpc,
         error: {
           code: this.ErrorCode["Authorization failed"],
-          message: "Authorization failed. Invalid access key.",
+          message: `Authorization failed. ${errMsg}`,
         },
         id,
       };
-      this.addLog_(
-        this.date,
-        method,
-        id,
-        "server --> client",
-        JSON.stringify(errObj),
-      );
+      this.addLog_(new Date(), "Authentication", id, "server --> client", JSON.stringify(errObj));
       return this.createContent_(errObj);
     }
 
-    // 3 & 4. Handle 'message/send' and 'tasks/send' seamlessly
+    // [Phases 3-7 triggered via processAgents_] Handle 'message/send' and 'tasks/send' seamlessly
     if ((method === "message/send" || method === "tasks/send") && functions) {
       if (typeof functions !== "function") {
         return this.createErrorResponse_(
@@ -391,6 +380,7 @@ var A2AApp = class A2AApp {
         const { message } = params;
         const prompt = message?.parts?.[0]?.text || "";
 
+        // Trigger the internal orchestration logic on the server side
         const { result, history } = this.processAgents_({
           apiKey,
           prompt,
@@ -453,23 +443,18 @@ var A2AApp = class A2AApp {
                   status: {
                     state: this.TaskState.completed,
                     message: { role: "agent", parts: messageParts },
-                    timestamp: this.date.toISOString(),
+                    timestamp: new Date().toISOString(),
                   },
                   artifacts,
                 },
                 id,
               };
 
-        this.addLog_(
-          this.date,
-          method,
-          id,
-          "server --> client",
-          JSON.stringify(resObj),
-        );
+        // [Phase 7: Final Synthesis] Returning the final response structure to the calling client.
+        this.addLog_(new Date(), "[Phase 7: Final Synthesis]", id, "server --> client", JSON.stringify(resObj));
         return this.createContent_(resObj);
       } catch (err) {
-        console.error(err.stack);
+        console.error(`--- Server Process Error: ${err.stack}`);
         return this.createErrorResponse_(
           `Internal server error. Error message: ${err.stack}`,
           id,
@@ -490,7 +475,7 @@ var A2AApp = class A2AApp {
       try {
         return JSON.parse(e.postData.contents);
       } catch (err) {
-        console.warn("Failed to parse postData contents.", err);
+        console.warn("--- Failed to parse postData contents.", err);
       }
     }
     return {};
@@ -522,15 +507,20 @@ var A2AApp = class A2AApp {
         .setValues(rows);
       this.values = [];
     } catch (err) {
-      console.error("Failed to write to log sheet.", err);
+      console.error("--- Failed to write to log sheet.", err);
     }
   }
 
   /**
-   * Prepare client-side functions inclusive of remote agents.
+   * [Phase 3: Tool Proxying] Prepare client-side functions inclusive of remote agents.
+   * Incorporates detailed logging wrappers for introspection.
    * @private
    */
   getClientFunctions_(agentCards, addedFunctions) {
+    const phaseTag = "[Phase 3: Tool Proxying]";
+    console.log(`${phaseTag} Initiated capabilities mapping.`);
+    this.addLog_(new Date(), phaseTag, null, `${this.contextType} internal`, "Mapping capabilities into Function Calling schemas.");
+
     let funcs = {
       params_: {
         without_agent: {
@@ -550,16 +540,18 @@ var A2AApp = class A2AApp {
         },
       },
       without_agent: ({ task, response }) => {
-        console.log("--- without_agent");
-        console.log(`--- Prompt: ${task}`);
+        const msgCall = `--- without_agent invoked. Prompt: ${task}`;
+        console.log(msgCall);
+        this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, `${this.contextType} internal`, msgCall);
         return { task, result: response };
       },
     };
 
-    // Integrate Discovered AI agents
+    // Integrate Discovered AI agents via dynamic schema proxying
     if (agentCards.length > 0) {
       agentCards.forEach(({ name, description, url, provider, skills }) => {
-        const safeName = name.replace(/ /g, "_");
+        // Add 'customType_' prefix to intentionally bypass GeminiWithFiles automatic loop execution.
+        const safeName = "customType_" + name.replace(/ /g, "_");
         const skillStr = skills
           .map(
             (o) =>
@@ -598,9 +590,11 @@ var A2AApp = class A2AApp {
         };
 
         // Define proxy facade to safely remote trigger specific capabilities
-        funcs[safeName] = ({ agent_name, agent_url, task }) => {
-          console.log(`--- with_agent: "${agent_name}"`);
-          console.log(`--- Prompt: ${task}`);
+        funcs[safeName] = (args) => {
+          const { agent_name, agent_url, task } = args;
+          const msgCall = `Agent Call proxy invoked: "${agent_name}" | Assigned Task: "${task}" | URL: ${agent_url}`;
+          console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
+          this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, `${this.contextType} internal`, msgCall);
 
           const id1 = Utilities.newBlob(new Date().getTime().toString())
             .getBytes()
@@ -621,35 +615,56 @@ var A2AApp = class A2AApp {
             },
           };
 
-          this.addLog_(
-            this.date,
-            null,
-            null,
-            "client --> server",
-            JSON.stringify(resObj),
-          );
+          this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "client --> server", `JSON-RPC Payload created: ${JSON.stringify(resObj)}`);
 
+          // Wrap response in 'items' pattern to enforce the immediate bypass strategy 
+          // and forcefully specify 'method' and 'contentType' to avoid invalid generic GET requests.
           return {
-            agent_name,
-            task,
-            agent_url,
-            request: {
-              url: agent_url,
-              payload: JSON.stringify(resObj),
-              headers: this.headers,
-              muteHttpExceptions: true,
-            },
-            resObj,
+            items: {
+              functionResponse: {
+                request: {
+                  url: agent_url,
+                  method: "post",
+                  contentType: "application/json",
+                  payload: JSON.stringify(resObj),
+                  headers: this.headers,
+                  muteHttpExceptions: true,
+                },
+                resObj,
+                name: safeName,
+                argsObj: args
+              }
+            }
           };
         };
       });
     }
 
-    // Merge User's custom defined implementations
+    // Merge User's custom defined implementations with interceptors for granular logging
     if (addedFunctions?.params_) {
       funcs.params_ = { ...funcs.params_, ...addedFunctions.params_ };
       Object.keys(addedFunctions).forEach((k) => {
-        if (k !== "params_") funcs[k] = addedFunctions[k];
+        if (k !== "params_") {
+          const originalFunc = addedFunctions[k];
+          funcs[k] = (args) => {
+            const msgCall = `Local Function Executed: "${k}" | Args: ${JSON.stringify(args)}`;
+            console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
+            this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgCall);
+            try {
+              const res = originalFunc(args);
+              const strRes = JSON.stringify(res) || "";
+              const msgRet = `Function Returned: "${k}" | Data: ${strRes.substring(0, 1000)}`;
+              console.log(`[Phase 5: Sequential Execution] ${msgRet}`);
+              this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgRet);
+              return res;
+            } catch (err) {
+              const msgErr = `Function Error: "${k}" | Stack: ${err.stack}`;
+              console.error(`[Phase 5: Sequential Execution] ${msgErr}`);
+              this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgErr);
+              throw err;
+            }
+          };
+        }
       });
     }
 
@@ -669,14 +684,17 @@ var A2AApp = class A2AApp {
   }
 
   /**
-   * Retrieve and parse agent cards optimally from given URLs.
+   * [Phase 2: Agent Discovery] Retrieve and parse agent cards optimally from given URLs.
    * @param {Array<String>} agentCardUrls Array of strings referring to remote card sources.
    * @return {Array<Object>} Array of sanitized agent card objects.
    */
   getAgentCards(agentCardUrls) {
-    console.log("--- start: Get agent card");
+    const phaseTag = "[Phase 2: Agent Discovery]";
+    console.log(`${phaseTag} Initiating agent card retrieval.`);
+    this.addLog_(new Date(), phaseTag, null, `${this.contextType} internal`, `Target URLs: ${agentCardUrls.join(", ")}`);
+
     if (!agentCardUrls || agentCardUrls.length === 0) {
-      console.warn("No agent cards.");
+      console.warn(`${phaseTag} No agent cards URLs provided.`);
       return [];
     }
 
@@ -686,6 +704,9 @@ var A2AApp = class A2AApp {
       const targetUrl = ["exec", "dev"].includes(path)
         ? `${url.trim()}/.well-known/agent-card.json`
         : url.trim();
+
+      // Log outgoing request intention
+      this.addLog_(new Date(), phaseTag, null, "client --> server", `Requesting well-known agent configuration from: ${targetUrl}`);
 
       return {
         url: this.addQueryParameters_(targetUrl, queryParameters || {}),
@@ -704,29 +725,27 @@ var A2AApp = class A2AApp {
             o.name = o.name.replace(/ /g, "_");
           }
           acc.push(o);
+          this.addLog_(new Date(), phaseTag, null, "server --> client", `Successfully retrieved card for agent: ${o.name}`);
         } catch (e) {
-          console.warn(
-            `Failed to parse agent card from "${agentCardUrls[i]}".`,
-          );
+          console.warn(`${phaseTag} Failed to parse agent card from "${agentCardUrls[i]}".`);
         }
       } else {
-        console.warn(
-          `Didn't get agent card from "${agentCardUrls[i]}". Status: ${res.getResponseCode()}`,
-        );
+        console.warn(`${phaseTag} Didn't get agent card from "${agentCardUrls[i]}". HTTP Status: ${res.getResponseCode()}`);
       }
       return acc;
     }, []);
 
     if (agentCards.length === 0) {
-      console.warn("No agent cards found.");
+      console.warn(`${phaseTag} No valid agent cards found.`);
     }
 
-    console.log("--- end: Get agent card");
+    console.log(`${phaseTag} Agent card retrieval complete.`);
     return agentCards;
   }
 
   /**
    * Core execution orchestration engine for handling prompt assignments dynamically.
+   * Runs sequentially through Phase 4, 5, 6, 7.
    * @private
    */
   processAgents_(object) {
@@ -738,13 +757,17 @@ var A2AApp = class A2AApp {
       fileAsBlob = false,
       functions,
     } = object;
+
+    // [Phase 3: Tool Proxying]
     const addedFunctions = functions ? { ...functions } : null;
     const createdFunctions = this.getClientFunctions_(
       agentCards,
       addedFunctions,
     );
 
-    console.log("--- start: Analyze prompt and select agents.");
+    // [Phase 4: Planning]
+    const phase4Tag = "[Phase 4: Planning]";
+    console.log(`${phase4Tag} Analyzing prompt and selecting optimal routing.`);
 
     let agents = agentCards.map(({ name, description, url, skills }) => {
       const skillStr = skills.map(
@@ -760,13 +783,9 @@ var A2AApp = class A2AApp {
     );
     if (functionCallings.length === 0) functionCallings = ["No functions."];
 
-    this.addLog_(
-      this.date,
-      null,
-      null,
-      "server --> client",
-      JSON.stringify(agents),
-    );
+    const msgAnalyze = `Available Remote Agents: ${agentCards.length} | Available Local Functions/Proxies: ${Object.keys(createdFunctions.params_).length}`;
+    console.log(`${phase4Tag} ${msgAnalyze}`);
+    this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, msgAnalyze);
 
     // Construct the guiding System Instruction layout dynamically
     const systemInstructionText = [
@@ -792,6 +811,7 @@ var A2AApp = class A2AApp {
       "- If you are unsure, ask the user for more details.",
       "- Suggest the suitable order of the agents and the functions to resolve the user's prompt.",
       "- When the requests include both the agent can resolve and the agent cannot resolve, suggest the order by including the agents, functions, and 'without_agent'.",
+      "- Do not fabricate or invent any agent names or function names. Use ONLY the ones explicitly provided.",
       `- Don't include some code in the response value like "tool_code".`,
       `- Don't suggest some code in the response value like "tool_code".`,
       `- If you are required to know the current date time, it's "${Utilities.formatDate(this.date, this.timezone, "yyyy-MM-dd HH:mm:ss")}". And, timezone is ${this.timezone}.`,
@@ -832,7 +852,10 @@ var A2AApp = class A2AApp {
     const textPrompt = `User's prompt is as follows.\n<UserPrompt>${prompt}</UserPrompt>`;
     const orderAr = g.generateContent({ q: textPrompt });
 
+    const msgOrder = `Determined Execution Order: ${JSON.stringify(orderAr)}`;
+    console.log(`${phase4Tag} ${msgOrder}`);
     forDebug && toLog_("orderAr", JSON.stringify(orderAr));
+    this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, msgOrder);
 
     if (!Array.isArray(orderAr) || orderAr.length === 0) {
       const errObj = {
@@ -843,22 +866,23 @@ var A2AApp = class A2AApp {
         jsonrpc: this.jsonrpc,
         id: null,
       };
-      this.addLog_(
-        this.date,
-        null,
-        null,
-        "Client side",
-        JSON.stringify(errObj),
-      );
+      console.error(`${phase4Tag} Execution Order Generation Failed.`);
+      this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, JSON.stringify(errObj));
       return errObj;
     }
 
-    console.log("--- start: Process result.");
+    // [Phase 5: Sequential Execution]
+    const phase5Tag = "[Phase 5: Sequential Execution]";
+    console.log(`${phase5Tag} Initiating sequential execution based on planning phase.`);
     let tempHistory = [...g.history];
     const results = [];
 
     // Evaluate the sequential path sequentially
     for (const { name, task } of orderAr) {
+      const msgExec = `Delegating to Tool/Agent: "${name}" | Task Details: "${task}"`;
+      console.log(`${phase5Tag} ${msgExec}`);
+      this.addLog_(new Date(), phase5Tag, null, `${this.contextType} internal`, msgExec);
+
       const funcCall = {
         params_: { [name]: createdFunctions.params_[name] },
         [name]: createdFunctions[name],
@@ -883,17 +907,40 @@ var A2AApp = class A2AApp {
       ].join("\n");
 
       const res = gg.generateContent({ q });
+      
+      const msgResType = `Result received from Gemini node for "${name}" | Type: [${typeof res}] | Content preview: ${typeof res === "string" ? res : JSON.stringify(res).substring(0, 500)}`;
+      console.log(`${phase5Tag} ${msgResType}`);
+      this.addLog_(new Date(), phase5Tag, null, `${this.contextType} internal`, msgResType);
       forDebug && toLog_("In task loop", JSON.stringify(res));
 
-      const funcRes = res.functionResponse;
+      // Check if bypassed via customType_ return mechanism
+      const funcRes = res.functionResponse || (res.items && res.items.functionResponse ? res.items.functionResponse : undefined);
 
       // Handle the resulting operation appropriately whether standard Function or A2A
-      if (funcRes?.request) {
+      if (typeof res === "string") {
+        results.push({ type: "text", text: res });
+      } else if (res.text) {
+        results.push({ type: "text", text: res.text });
+      } else if (Array.isArray(res)) {
+        // Handle array responses naturally
+        const texts = res.map(r => typeof r === "string" ? r : (r.text || JSON.stringify(r)));
+        results.push({ type: "text", text: texts.join("\n") });
+      } else if (funcRes?.request) {
         const req = funcRes.request;
-        const re = UrlFetchApp.fetch(req.url, req);
+        const msgReq = `Dispatching JSON-RPC request to remote agent: ${req.url}`;
+        console.log(`${phase5Tag} ${msgReq}`);
+        this.addLog_(new Date(), phase5Tag, null, "client --> server", msgReq);
 
-        if (re.getResponseCode() === 200) {
-          const oo = JSON.parse(re.getContentText());
+        const re = UrlFetchApp.fetch(req.url, req);
+        const code = re.getResponseCode();
+        const body = re.getContentText();
+        
+        const msgRes = `Remote agent responded with HTTP Code: ${code}`;
+        console.log(`${phase5Tag} ${msgRes}`);
+        this.addLog_(new Date(), phase5Tag, null, "server --> client", `Code: ${code}, Body: ${body.substring(0, 1500)}`);
+
+        if (code === 200) {
+          const oo = JSON.parse(body);
           if (oo.result) {
             const {
               id: id1,
@@ -910,7 +957,17 @@ var A2AApp = class A2AApp {
                 ({ parts }) => parts,
               );
               const messageParts = oo.result.status.message?.parts || [];
-              const m = [...messageParts, ...sArtifacts];
+              
+              // Deduplicate redundant text blocks natively spawned from separate artifact schemas
+              const uniqueTexts = new Set();
+              const m = [...messageParts, ...sArtifacts].filter(part => {
+                if (part.type === "text") {
+                   const txt = part.text || "";
+                   if (uniqueTexts.has(txt)) return false;
+                   uniqueTexts.add(txt);
+                }
+                return true;
+              });
 
               results.push(...m);
 
@@ -928,21 +985,37 @@ var A2AApp = class A2AApp {
                 ];
               }
 
-              const lastHistory = gg.history[gg.history.length - 1];
-              if (lastHistory?.parts?.[0]?.functionResponse?.response) {
-                lastHistory.parts[0].functionResponse.response.content =
-                  bkHistory;
+              // Manually patch the history array as the loop bypass prevents GeminiWithFiles from appending the call details automatically.
+              if (funcRes.name && funcRes.argsObj) {
+                gg.history.push({
+                  role: "model",
+                  parts: [{ functionCall: { name: funcRes.name, args: funcRes.argsObj } }]
+                });
+                gg.history.push({
+                  role: "function",
+                  parts: [{ functionResponse: { name: funcRes.name, response: { name: funcRes.name, content: bkHistory } } }]
+                });
+              } else {
+                const lastHistory = gg.history[gg.history.length - 1];
+                if (lastHistory?.parts?.[0]?.functionResponse?.response) {
+                  lastHistory.parts[0].functionResponse.response.content =
+                    bkHistory;
+                }
               }
             } else {
-              results.push(`Error: ${name}, ${task}`);
+              const errMsg = `Error: Remote agent ${name} did not complete successfully. Task: ${task}`;
+              console.error(`${phase5Tag} ${errMsg}`);
+              results.push({ type: "text", text: errMsg });
             }
           } else if (oo.error) {
-            results.push(
-              `Error: ${name}, ${task}. ${JSON.stringify(oo.error)}`,
-            );
+            const errMsg = `Error: Remote agent ${name} returned error: ${JSON.stringify(oo.error)}`;
+            console.error(`${phase5Tag} ${errMsg}`);
+            results.push({ type: "text", text: errMsg });
           }
         } else {
-          results.push(`Error: ${name}, ${task}`);
+          const errMsg = `Error: Remote agent ${name} returned HTTP ${code}. Task: ${task}`;
+          console.error(`${phase5Tag} ${errMsg}`);
+          results.push({ type: "text", text: errMsg });
         }
       } else if (funcRes?.result) {
         let text = funcRes.result;
@@ -953,22 +1026,28 @@ var A2AApp = class A2AApp {
       } else if (funcRes?.a2a?.result) {
         results.push({ type: "text", text: funcRes.a2a.result });
       } else {
+        // Enforce standard object output architecture so subsequent file evaluation map skips over this payload properly.
+        const errMsg = `Error: Name: ${name}, Task: ${task}, Unhandled Result Type: ${JSON.stringify(res)}`;
+        console.error(`${phase5Tag} ${errMsg}`);
         results.push({
-          error: `Error: Name: ${name}, Task: ${task}, Result: ${JSON.stringify(res)}`,
+          type: "text",
+          text: errMsg,
         });
       }
       tempHistory = gg.history;
     }
 
-    // Isolate Final structural outcomes vs physical data allocations (Files vs Textual)
+    // [Phase 6: Data Materialization]
+    const phase6Tag = "[Phase 6: Data Materialization]";
+    console.log(`${phase6Tag} Isolating textual structural outcomes and physical blobs.`);
     let finalResults = results.map((o) => {
       const type = o.type;
       if (type === "text") {
-        console.log("Generate content with agents. Return as a text.");
+        this.addLog_(new Date(), phase6Tag, null, `${this.contextType} internal`, "Result materialized as pure text.");
         return o[type] || o.text;
       }
 
-      console.log("Generate content with agents. Return as a file content.");
+      this.addLog_(new Date(), phase6Tag, null, `${this.contextType} internal`, "Result materialized as binary file content.");
       const data = o[type];
       let fileBlob;
       if (data?.bytes) {
@@ -996,39 +1075,43 @@ var A2AApp = class A2AApp {
 
     forDebug && toLog_("finalResults1", JSON.stringify(finalResults));
 
-    // Aggregate textual extractions correctly saving network overhead globally
+    // [Phase 7: Final Synthesis]
+    const phase7Tag = "[Phase 7: Final Synthesis]";
+    console.log(`${phase7Tag} Synthesizing final aggregate outputs.`);
     const strResults = finalResults.filter((e) => typeof e === "string");
     if (strResults.length > 0) {
-      const gg = new GeminiWithFiles({
-        apiKey,
-        model: this.model,
-        history: tempHistory,
-      });
-      const res3 = gg.generateContent({
-        parts: [
-          { text: `Summarize answers by considering the question.` },
-          { text: `<Question>${prompt}</Question>` },
-          { text: `<Answers>${strResults.join("\n")}</Answers>` },
-        ],
-      });
-      g.history = gg.history;
-      finalResults = [
-        res3,
-        ...finalResults.filter((e) => typeof e !== "string"),
-      ];
+      if (strResults.length === 1 && finalResults.length === 1) {
+        // Optimization: Skip unnecessary summarization if only one string outcome exists
+        this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "Bypassing extra synthesis step due to singular text outcome.");
+        g.history = tempHistory;
+      } else {
+        this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "Aggregating multiple textual blocks via LLM abstraction.");
+        const gg = new GeminiWithFiles({
+          apiKey,
+          model: this.model,
+          history: tempHistory,
+        });
+        const res3 = gg.generateContent({
+          parts: [
+            { text: `Summarize answers by considering the question.` },
+            { text: `<Question>${prompt}</Question>` },
+            { text: `<Answers>${strResults.join("\n")}</Answers>` },
+          ],
+        });
+        g.history = gg.history;
+        finalResults = [
+          res3,
+          ...finalResults.filter((e) => typeof e !== "string"),
+        ];
+      }
     } else {
+      this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "No string components required synthesis.");
       g.history = tempHistory;
     }
 
-    this.addLog_(
-      this.date,
-      null,
-      null,
-      "Client side",
-      JSON.stringify(finalResults),
-    );
+    this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, `Finalized payload synthesis completed: ${JSON.stringify(finalResults).substring(0, 1000)}`);
 
-    console.log("--- end: Process result.");
+    console.log(`${phase7Tag} Completed.`);
     forDebug && toLog_("finalResults2", JSON.stringify(finalResults));
 
     return { result: finalResults, history: g.history, agentCards };
