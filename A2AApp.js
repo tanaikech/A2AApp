@@ -30,7 +30,7 @@ const toLog_ = (kind, text) => {
  * - [Phase 7: Final Synthesis] Generating the ultimate summarized response.
  *
  * Author: Kanshi Tanaike
- * Version: 2.2.1
+ * Version: 2.2.2
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -557,7 +557,6 @@ var A2AApp = class A2AApp {
           .map((o) => {
             const name = o.name || "no name";
             const description = o.description || "no description";
-            // examplesが存在し、かつ要素があるかチェック
             const examples = o.examples && o.examples.length > 0
               ? o.examples.join(", ")
               : "no examples";
@@ -777,9 +776,8 @@ var A2AApp = class A2AApp {
     console.log(`${phase4Tag} Analyzing prompt and selecting optimal routing.`);
 
     let agents = agentCards.map(({ name, description, url, skills }) => {
-      const skillStr = skills.map(
-        (e) =>
-          `Skill name: ${e.name}, Description of skill: ${e.description}, Examples: ${e.examples.join(",")}`,
+      const skillStr = skills.map((e) =>
+        `Skill name: ${e.name || "no name"}, Description of skill: ${e.description || "no description"}, Examples: ${(e.examples && e.examples.length) ? e.examples.join(",") : "no examples"}`
       );
       return `- Name: "${name}", Description: "${description}", URL: "${url}", skills: "${skillStr}"`;
     });

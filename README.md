@@ -430,4 +430,7 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 - v2.2.1 (May 18, 2026)
   1. A bug was removed.
 
+- v2.2.2 (May 18, 2026)
+  1. A bug was removed.
+
 [TOP](#top)
