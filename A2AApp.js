@@ -16,10 +16,28 @@ const toLog_ = (kind, text) => {
  * Class object for A2AApp.
  * This is used for building both an Agent2Agent (A2A) server and an A2A client with Google Apps Script.
  * 
- * ### Important Note
- * If this script is used as a server (Web App), you MUST create a "New Deployment" 
- * after updating the code. Otherwise, the old cached script will be executed.
+ * ### Usage Example
+ * ```javascript
+ * const agentCardUrls = [
+ *   "https://public.agent.com",
+ *   { "secure-agent": { "httpUrl": "https://secure.agent.com", "headers": { "X-Agent-Key": "my-secret" } } }
+ * ];
  * 
+ * const app = new A2AApp({ model: "models/gemini-3-flash-preview" });
+ * app.setServices({ lock: LockService.getScriptLock() });
+ * 
+ * const response = app.client({
+ *   apiKey: "YOUR_GEMINI_API_KEY",
+ *   prompt: "Ask the secure agent about the current server status.",
+ *   agentCardUrls: agentCardUrls
+ * });
+ * console.log(response.result);
+ * ```
+ *
+ * ### Important Note
+ * If this script is used as a server (Web App), you MUST create a "New Deployment"
+ * after updating the code. Otherwise, the old cached script will be executed.
+ *
  * ### Execution Phases Logged:
  * - [Phase 1: Concurrency Control] LockService limits concurrent overlaps.
  * - [Phase 2: Agent Discovery] Retrieving `.well-known/agent-card.json`.
@@ -30,7 +48,8 @@ const toLog_ = (kind, text) => {
  * - [Phase 7: Final Synthesis] Generating the ultimate summarized response.
  *
  * Author: Kanshi Tanaike
- * Version: 2.2.2
+ * Refactored by: Senior Generative AI & MCP Expert
+ * Version: 2.3.0
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -130,8 +149,8 @@ var A2AApp = class A2AApp {
    * Set services dependent on each script.
    *
    * @param {Object} services Object containing services.
-   * @param {LockService.Lock} services.lock Lock service instance.
-   * @param {PropertiesService.Properties} services.properties Properties service instance.
+   * @param {GoogleAppsScript.Lock.Lock} services.lock Lock service instance.
+   * @param {GoogleAppsScript.Properties.Properties} services.properties Properties service instance.
    * @return {A2AApp}
    */
   setServices(services) {
@@ -153,7 +172,7 @@ var A2AApp = class A2AApp {
    * @param {String} object.apiKey API key for Gemini.
    * @param {Function} object.agentCard Getter function for agent card object.
    * @param {Function} object.functions Getter function for functions object.
-   * @return {ContentService.TextOutput}
+   * @return {GoogleAppsScript.Content.TextOutput}
    */
   server(object = {}) {
     this.contextType = "server";
@@ -164,15 +183,22 @@ var A2AApp = class A2AApp {
 
     // [Phase 1: Concurrency Control] Server-side locking to prevent race conditions
     if (!lock.tryLock(350000)) {
-      const msg = "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
+      const msg =
+        "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
       console.error(msg);
       return this.createErrorResponse_(
         `Internal server error. Error message: ${msg}`,
         id,
-        "[Phase 1: Concurrency Control]"
+        "[Phase 1: Concurrency Control]",
       );
     }
-    this.addLog_(new Date(), "[Phase 1: Concurrency Control]", id, "server internal", "Lock acquired successfully.");
+    this.addLog_(
+      new Date(),
+      "[Phase 1: Concurrency Control]",
+      id,
+      "server internal",
+      "Lock acquired successfully.",
+    );
 
     try {
       const { eventObject, agentCardUrls = [], agentCards = [] } = object;
@@ -192,7 +218,7 @@ var A2AApp = class A2AApp {
       return this.createErrorResponse_(
         `Internal server error. Error message: ${err.stack}`,
         id,
-        "Server Main Process"
+        "Server Main Process",
       );
     } finally {
       lock.releaseLock();
@@ -212,16 +238,29 @@ var A2AApp = class A2AApp {
 
     // [Phase 1: Concurrency Control] Client-side locking
     if (!lock.tryLock(350000)) {
-      const msg = "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
+      const msg =
+        "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
       console.error(msg);
       const errObj = {
         error: { message: `Internal server error. Error message: ${msg}` },
       };
-      this.addLog_(new Date(), "[Phase 1: Concurrency Control]", null, "client internal", JSON.stringify(errObj));
+      this.addLog_(
+        new Date(),
+        "[Phase 1: Concurrency Control]",
+        null,
+        "client internal",
+        JSON.stringify(errObj),
+      );
       this.log_();
       return errObj;
     }
-    this.addLog_(new Date(), "[Phase 1: Concurrency Control]", null, "client internal", "Lock acquired successfully.");
+    this.addLog_(
+      new Date(),
+      "[Phase 1: Concurrency Control]",
+      null,
+      "client internal",
+      "Lock acquired successfully.",
+    );
 
     try {
       // [Phase 2: Agent Discovery] Fetch Agent Cards
@@ -240,7 +279,13 @@ var A2AApp = class A2AApp {
           message: `Internal server error. Error message: ${err.stack}`,
         },
       };
-      this.addLog_(new Date(), "Client Main Process", null, "client internal", JSON.stringify(errObj));
+      this.addLog_(
+        new Date(),
+        "Client Main Process",
+        null,
+        "client internal",
+        JSON.stringify(errObj),
+      );
       this.log_();
       return errObj;
     } finally {
@@ -267,7 +312,13 @@ var A2AApp = class A2AApp {
    */
   addLog_(date, phaseOrMethod, id, direction, message) {
     if (this.log) {
-      this.values.push([date, phaseOrMethod || "", id || "", direction || "", message]);
+      this.values.push([
+        date,
+        phaseOrMethod || "",
+        id || "",
+        direction || "",
+        message,
+      ]);
     }
   }
 
@@ -281,7 +332,13 @@ var A2AApp = class A2AApp {
       error: { code: this.ErrorCode["Internal server error"], message },
       id,
     };
-    this.addLog_(new Date(), phaseOrMethod || "Error Response", id, "server --> client", JSON.stringify(errObj));
+    this.addLog_(
+      new Date(),
+      phaseOrMethod || "Error Response",
+      id,
+      "server --> client",
+      JSON.stringify(errObj),
+    );
     this.log_();
     return this.createContent_(errObj);
   }
@@ -307,7 +364,13 @@ var A2AApp = class A2AApp {
       pathInfo === ".well-known/agent.json" ||
       pathInfo === ".well-known/agent-card.json"
     ) {
-      this.addLog_(new Date(), "[Phase 2: Agent Discovery]", id, "client --> server", "Received request for Agent Card.");
+      this.addLog_(
+        new Date(),
+        "[Phase 2: Agent Discovery]",
+        id,
+        "client --> server",
+        "Received request for Agent Card.",
+      );
       if (typeof agentCard !== "function") {
         throw new Error("Agent card was not found or is not a function.");
       }
@@ -339,7 +402,13 @@ var A2AApp = class A2AApp {
         ...new Set(agentCardObj.defaultOutputModes),
       ];
 
-      this.addLog_(new Date(), "[Phase 2: Agent Discovery]", id, "server --> client", JSON.stringify(agentCardObj));
+      this.addLog_(
+        new Date(),
+        "[Phase 2: Agent Discovery]",
+        id,
+        "server --> client",
+        JSON.stringify(agentCardObj),
+      );
       return this.createContent_(agentCardObj);
     }
 
@@ -347,7 +416,13 @@ var A2AApp = class A2AApp {
     const method = obj.method.toLowerCase();
 
     // Log incoming payload as client --> server
-    this.addLog_(new Date(), `RPC Method: ${method}`, id, "client --> server", JSON.stringify(obj));
+    this.addLog_(
+      new Date(),
+      `RPC Method: ${method}`,
+      id,
+      "client --> server",
+      JSON.stringify(obj),
+    );
 
     // 2. Authentication Check
     if (this.accessKey && parameter.accessKey !== this.accessKey) {
@@ -362,7 +437,13 @@ var A2AApp = class A2AApp {
         },
         id,
       };
-      this.addLog_(new Date(), "Authentication", id, "server --> client", JSON.stringify(errObj));
+      this.addLog_(
+        new Date(),
+        "Authentication",
+        id,
+        "server --> client",
+        JSON.stringify(errObj),
+      );
       return this.createContent_(errObj);
     }
 
@@ -426,33 +507,39 @@ var A2AApp = class A2AApp {
         const resObj =
           method === "message/send"
             ? {
-              jsonrpc: this.jsonrpc,
-              result: {
-                kind: "message",
-                messageId: params.messageId,
-                parts: messageParts,
-                role: "agent",
-              },
-              id,
-            }
-            : {
-              jsonrpc: this.jsonrpc,
-              result: {
-                kind: "task",
-                id: params.id,
-                sessionId: params.sessionId,
-                status: {
-                  state: this.TaskState.completed,
-                  message: { role: "agent", parts: messageParts },
-                  timestamp: new Date().toISOString(),
+                jsonrpc: this.jsonrpc,
+                result: {
+                  kind: "message",
+                  messageId: params.messageId,
+                  parts: messageParts,
+                  role: "agent",
                 },
-                artifacts,
-              },
-              id,
-            };
+                id,
+              }
+            : {
+                jsonrpc: this.jsonrpc,
+                result: {
+                  kind: "task",
+                  id: params.id,
+                  sessionId: params.sessionId,
+                  status: {
+                    state: this.TaskState.completed,
+                    message: { role: "agent", parts: messageParts },
+                    timestamp: new Date().toISOString(),
+                  },
+                  artifacts,
+                },
+                id,
+              };
 
         // [Phase 7: Final Synthesis] Returning the final response structure to the calling client.
-        this.addLog_(new Date(), "[Phase 7: Final Synthesis]", id, "server --> client", JSON.stringify(resObj));
+        this.addLog_(
+          new Date(),
+          "[Phase 7: Final Synthesis]",
+          id,
+          "server --> client",
+          JSON.stringify(resObj),
+        );
         return this.createContent_(resObj);
       } catch (err) {
         console.error(`--- Server Process Error: ${err.stack}`);
@@ -514,13 +601,19 @@ var A2AApp = class A2AApp {
 
   /**
    * [Phase 3: Tool Proxying] Prepare client-side functions inclusive of remote agents.
-   * Incorporates detailed logging wrappers for introspection.
+   * Incorporates detailed logging wrappers for introspection and injects custom headers for authenticated routing.
    * @private
    */
   getClientFunctions_(agentCards, addedFunctions) {
     const phaseTag = "[Phase 3: Tool Proxying]";
     console.log(`${phaseTag} Initiated capabilities mapping.`);
-    this.addLog_(new Date(), phaseTag, null, `${this.contextType} internal`, "Mapping capabilities into Function Calling schemas.");
+    this.addLog_(
+      new Date(),
+      phaseTag,
+      null,
+      `${this.contextType} internal`,
+      "Mapping capabilities into Function Calling schemas.",
+    );
 
     let funcs = {
       params_: {
@@ -543,23 +636,30 @@ var A2AApp = class A2AApp {
       without_agent: ({ task, response }) => {
         const msgCall = `--- without_agent invoked. Prompt: ${task}`;
         console.log(msgCall);
-        this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, `${this.contextType} internal`, msgCall);
+        this.addLog_(
+          new Date(),
+          "[Phase 5: Sequential Execution]",
+          null,
+          `${this.contextType} internal`,
+          msgCall,
+        );
         return { task, result: response };
       },
     };
 
     // Integrate Discovered AI agents via dynamic schema proxying
     if (agentCards.length > 0) {
-      agentCards.forEach(({ name, description, url, provider, skills }) => {
+      agentCards.forEach(({ name, description, url, provider, skills, customHeaders = {} }) => {
         // Add 'customType_' prefix to intentionally bypass GeminiWithFiles automatic loop execution.
         const safeName = "customType_" + name.replace(/ /g, "_");
         const skillStr = skills
           .map((o) => {
             const name = o.name || "no name";
             const description = o.description || "no description";
-            const examples = o.examples && o.examples.length > 0
-              ? o.examples.join(", ")
-              : "no examples";
+            const examples =
+              o.examples && o.examples.length > 0
+                ? o.examples.join(", ")
+                : "no examples";
 
             return `id: ${o.id}, name: ${name}, description: ${description}, examples: ${examples}`;
           })
@@ -600,7 +700,13 @@ var A2AApp = class A2AApp {
           const { agent_name, agent_url, task } = args;
           const msgCall = `Agent Call proxy invoked: "${agent_name}" | Assigned Task: "${task}" | URL: ${agent_url}`;
           console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
-          this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, `${this.contextType} internal`, msgCall);
+          this.addLog_(
+            new Date(),
+            "[Phase 5: Sequential Execution]",
+            null,
+            `${this.contextType} internal`,
+            msgCall,
+          );
 
           const id1 = Utilities.newBlob(new Date().getTime().toString())
             .getBytes()
@@ -621,9 +727,18 @@ var A2AApp = class A2AApp {
             },
           };
 
-          this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "client --> server", `JSON-RPC Payload created: ${JSON.stringify(resObj)}`);
+          this.addLog_(
+            new Date(),
+            "[Phase 5: Sequential Execution]",
+            null,
+            "client --> server",
+            `JSON-RPC Payload created: ${JSON.stringify(resObj)}`,
+          );
 
-          // Wrap response in 'items' pattern to enforce the immediate bypass strategy 
+          // Apply specific custom headers dynamically extracted from the normalization sequence
+          const combinedHeaders = { ...this.headers, ...customHeaders };
+
+          // Wrap response in 'items' pattern to enforce the immediate bypass strategy
           // and forcefully specify 'method' and 'contentType' to avoid invalid generic GET requests.
           return {
             items: {
@@ -633,14 +748,14 @@ var A2AApp = class A2AApp {
                   method: "post",
                   contentType: "application/json",
                   payload: JSON.stringify(resObj),
-                  headers: this.headers,
+                  headers: combinedHeaders,
                   muteHttpExceptions: true,
                 },
                 resObj,
                 name: safeName,
-                argsObj: args
-              }
-            }
+                argsObj: args,
+              },
+            },
           };
         };
       });
@@ -655,18 +770,36 @@ var A2AApp = class A2AApp {
           funcs[k] = (args) => {
             const msgCall = `Local Function Executed: "${k}" | Args: ${JSON.stringify(args)}`;
             console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
-            this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgCall);
+            this.addLog_(
+              new Date(),
+              "[Phase 5: Sequential Execution]",
+              null,
+              "server internal",
+              msgCall,
+            );
             try {
               const res = originalFunc(args);
               const strRes = JSON.stringify(res) || "";
               const msgRet = `Function Returned: "${k}" | Data: ${strRes.substring(0, 1000)}`;
               console.log(`[Phase 5: Sequential Execution] ${msgRet}`);
-              this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgRet);
+              this.addLog_(
+                new Date(),
+                "[Phase 5: Sequential Execution]",
+                null,
+                "server internal",
+                msgRet,
+              );
               return res;
             } catch (err) {
               const msgErr = `Function Error: "${k}" | Stack: ${err.stack}`;
               console.error(`[Phase 5: Sequential Execution] ${msgErr}`);
-              this.addLog_(new Date(), "[Phase 5: Sequential Execution]", null, "server internal", msgErr);
+              this.addLog_(
+                new Date(),
+                "[Phase 5: Sequential Execution]",
+                null,
+                "server internal",
+                msgErr,
+              );
               throw err;
             }
           };
@@ -691,32 +824,67 @@ var A2AApp = class A2AApp {
 
   /**
    * [Phase 2: Agent Discovery] Retrieve and parse agent cards optimally from given URLs.
-   * @param {Array<String>} agentCardUrls Array of strings referring to remote card sources.
+   * Handles string URLs as well as structured objects encapsulating custom headers.
+   * @param {Array<String|Object>} agentCardUrls Array of strings or objects referring to remote card sources.
    * @return {Array<Object>} Array of sanitized agent card objects.
    */
   getAgentCards(agentCardUrls) {
     const phaseTag = "[Phase 2: Agent Discovery]";
     console.log(`${phaseTag} Initiating agent card retrieval.`);
-    this.addLog_(new Date(), phaseTag, null, `${this.contextType} internal`, `Target URLs: ${agentCardUrls.join(", ")}`);
 
     if (!agentCardUrls || agentCardUrls.length === 0) {
       console.warn(`${phaseTag} No agent cards URLs provided.`);
       return [];
     }
 
-    const requests = agentCardUrls.map((u) => {
-      const { url, queryParameters } = this.parseQueryParameters_(u);
+    // Normalize inputs separating clean string paths and embedded object configurations
+    const normalizedUrls = agentCardUrls.map(item => {
+      if (typeof item === 'string' && item.trim() !== '') {
+        return { url: item.trim(), headers: {}, original: item };
+      } else if (typeof item === 'object' && item !== null) {
+        const key = Object.keys(item)[0];
+        const val = item[key];
+        if (val && val.httpUrl) {
+          return { url: val.httpUrl.trim(), headers: val.headers || {}, original: item };
+        }
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (normalizedUrls.length === 0) {
+      console.warn(`${phaseTag} No valid agent cards configurations parsed.`);
+      return [];
+    }
+
+    this.addLog_(
+      new Date(),
+      phaseTag,
+      null,
+      `${this.contextType} internal`,
+      `Target URLs Processed: ${normalizedUrls.length}`,
+    );
+
+    const requests = normalizedUrls.map((norm) => {
+      const { url, queryParameters } = this.parseQueryParameters_(norm.url);
       const path = url.split("/").pop();
       const targetUrl = ["exec", "dev"].includes(path)
         ? `${url.trim()}/.well-known/agent-card.json`
         : url.trim();
 
-      // Log outgoing request intention
-      this.addLog_(new Date(), phaseTag, null, "client --> server", `Requesting well-known agent configuration from: ${targetUrl}`);
+      // Merge native authentication scopes with the provided dynamic context headers
+      const combinedHeaders = { ...this.headers, ...norm.headers };
+
+      this.addLog_(
+        new Date(),
+        phaseTag,
+        null,
+        "client --> server",
+        `Requesting well-known agent configuration from: ${targetUrl}`,
+      );
 
       return {
         url: this.addQueryParameters_(targetUrl, queryParameters || {}),
-        headers: this.headers,
+        headers: combinedHeaders,
         muteHttpExceptions: true,
       };
     });
@@ -726,17 +894,29 @@ var A2AApp = class A2AApp {
       if (res.getResponseCode() === 200) {
         try {
           const o = JSON.parse(res.getContentText());
-          o.url = o.url || agentCardUrls[i];
+          o.url = o.url || normalizedUrls[i].url;
+          o.customHeaders = normalizedUrls[i].headers; // Inject mapping context downstream
+          
           if (o.name) {
             o.name = o.name.replace(/ /g, "_");
           }
           acc.push(o);
-          this.addLog_(new Date(), phaseTag, null, "server --> client", `Successfully retrieved card for agent: ${o.name}`);
+          this.addLog_(
+            new Date(),
+            phaseTag,
+            null,
+            "server --> client",
+            `Successfully retrieved card for agent: ${o.name}`,
+          );
         } catch (e) {
-          console.warn(`${phaseTag} Failed to parse agent card from "${agentCardUrls[i]}".`);
+          console.warn(
+            `${phaseTag} Failed to parse agent card from "${normalizedUrls[i].url}".`,
+          );
         }
       } else {
-        console.warn(`${phaseTag} Didn't get agent card from "${agentCardUrls[i]}". HTTP Status: ${res.getResponseCode()}`);
+        console.warn(
+          `${phaseTag} Didn't get agent card from "${normalizedUrls[i].url}". HTTP Status: ${res.getResponseCode()}`,
+        );
       }
       return acc;
     }, []);
@@ -776,8 +956,9 @@ var A2AApp = class A2AApp {
     console.log(`${phase4Tag} Analyzing prompt and selecting optimal routing.`);
 
     let agents = agentCards.map(({ name, description, url, skills }) => {
-      const skillStr = skills.map((e) =>
-        `Skill name: ${e.name || "no name"}, Description of skill: ${e.description || "no description"}, Examples: ${(e.examples && e.examples.length) ? e.examples.join(",") : "no examples"}`
+      const skillStr = skills.map(
+        (e) =>
+          `Skill name: ${e.name || "no name"}, Description of skill: ${e.description || "no description"}, Examples: ${e.examples && e.examples.length ? e.examples.join(",") : "no examples"}`,
       );
       return `- Name: "${name}", Description: "${description}", URL: "${url}", skills: "${skillStr}"`;
     });
@@ -790,7 +971,13 @@ var A2AApp = class A2AApp {
 
     const msgAnalyze = `Available Remote Agents: ${agentCards.length} | Available Local Functions/Proxies: ${Object.keys(createdFunctions.params_).length}`;
     console.log(`${phase4Tag} ${msgAnalyze}`);
-    this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, msgAnalyze);
+    this.addLog_(
+      new Date(),
+      phase4Tag,
+      null,
+      `${this.contextType} internal`,
+      msgAnalyze,
+    );
 
     // Construct the guiding System Instruction layout dynamically
     const systemInstructionText = [
@@ -860,7 +1047,13 @@ var A2AApp = class A2AApp {
     const msgOrder = `Determined Execution Order: ${JSON.stringify(orderAr)}`;
     console.log(`${phase4Tag} ${msgOrder}`);
     forDebug && toLog_("orderAr", JSON.stringify(orderAr));
-    this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, msgOrder);
+    this.addLog_(
+      new Date(),
+      phase4Tag,
+      null,
+      `${this.contextType} internal`,
+      msgOrder,
+    );
 
     if (!Array.isArray(orderAr) || orderAr.length === 0) {
       const errObj = {
@@ -872,13 +1065,21 @@ var A2AApp = class A2AApp {
         id: null,
       };
       console.error(`${phase4Tag} Execution Order Generation Failed.`);
-      this.addLog_(new Date(), phase4Tag, null, `${this.contextType} internal`, JSON.stringify(errObj));
+      this.addLog_(
+        new Date(),
+        phase4Tag,
+        null,
+        `${this.contextType} internal`,
+        JSON.stringify(errObj),
+      );
       return errObj;
     }
 
     // [Phase 5: Sequential Execution]
     const phase5Tag = "[Phase 5: Sequential Execution]";
-    console.log(`${phase5Tag} Initiating sequential execution based on planning phase.`);
+    console.log(
+      `${phase5Tag} Initiating sequential execution based on planning phase.`,
+    );
     let tempHistory = [...g.history];
     const results = [];
 
@@ -886,7 +1087,13 @@ var A2AApp = class A2AApp {
     for (const { name, task } of orderAr) {
       const msgExec = `Delegating to Tool/Agent: "${name}" | Task Details: "${task}"`;
       console.log(`${phase5Tag} ${msgExec}`);
-      this.addLog_(new Date(), phase5Tag, null, `${this.contextType} internal`, msgExec);
+      this.addLog_(
+        new Date(),
+        phase5Tag,
+        null,
+        `${this.contextType} internal`,
+        msgExec,
+      );
 
       const funcCall = {
         params_: { [name]: createdFunctions.params_[name] },
@@ -915,11 +1122,21 @@ var A2AApp = class A2AApp {
 
       const msgResType = `Result received from Gemini node for "${name}" | Type: [${typeof res}] | Content preview: ${typeof res === "string" ? res : JSON.stringify(res).substring(0, 500)}`;
       console.log(`${phase5Tag} ${msgResType}`);
-      this.addLog_(new Date(), phase5Tag, null, `${this.contextType} internal`, msgResType);
+      this.addLog_(
+        new Date(),
+        phase5Tag,
+        null,
+        `${this.contextType} internal`,
+        msgResType,
+      );
       forDebug && toLog_("In task loop", JSON.stringify(res));
 
       // Check if bypassed via customType_ return mechanism
-      const funcRes = res.functionResponse || (res.items && res.items.functionResponse ? res.items.functionResponse : undefined);
+      const funcRes =
+        res.functionResponse ||
+        (res.items && res.items.functionResponse
+          ? res.items.functionResponse
+          : undefined);
 
       // Handle the resulting operation appropriately whether standard Function or A2A
       if (typeof res === "string") {
@@ -928,7 +1145,9 @@ var A2AApp = class A2AApp {
         results.push({ type: "text", text: res.text });
       } else if (Array.isArray(res)) {
         // Handle array responses naturally
-        const texts = res.map(r => typeof r === "string" ? r : (r.text || JSON.stringify(r)));
+        const texts = res.map((r) =>
+          typeof r === "string" ? r : r.text || JSON.stringify(r),
+        );
         results.push({ type: "text", text: texts.join("\n") });
       } else if (funcRes?.request) {
         const req = funcRes.request;
@@ -942,7 +1161,13 @@ var A2AApp = class A2AApp {
 
         const msgRes = `Remote agent responded with HTTP Code: ${code}`;
         console.log(`${phase5Tag} ${msgRes}`);
-        this.addLog_(new Date(), phase5Tag, null, "server --> client", `Code: ${code}, Body: ${body.substring(0, 1500)}`);
+        this.addLog_(
+          new Date(),
+          phase5Tag,
+          null,
+          "server --> client",
+          `Code: ${code}, Body: ${body.substring(0, 1500)}`,
+        );
 
         if (code === 200) {
           const oo = JSON.parse(body);
@@ -965,7 +1190,7 @@ var A2AApp = class A2AApp {
 
               // Deduplicate redundant text blocks natively spawned from separate artifact schemas
               const uniqueTexts = new Set();
-              const m = [...messageParts, ...sArtifacts].filter(part => {
+              const m = [...messageParts, ...sArtifacts].filter((part) => {
                 if (part.type === "text") {
                   const txt = part.text || "";
                   if (uniqueTexts.has(txt)) return false;
@@ -994,11 +1219,25 @@ var A2AApp = class A2AApp {
               if (funcRes.name && funcRes.argsObj) {
                 gg.history.push({
                   role: "model",
-                  parts: [{ functionCall: { name: funcRes.name, args: funcRes.argsObj } }]
+                  parts: [
+                    {
+                      functionCall: {
+                        name: funcRes.name,
+                        args: funcRes.argsObj,
+                      },
+                    },
+                  ],
                 });
                 gg.history.push({
                   role: "function",
-                  parts: [{ functionResponse: { name: funcRes.name, response: { name: funcRes.name, content: bkHistory } } }]
+                  parts: [
+                    {
+                      functionResponse: {
+                        name: funcRes.name,
+                        response: { name: funcRes.name, content: bkHistory },
+                      },
+                    },
+                  ],
                 });
               } else {
                 const lastHistory = gg.history[gg.history.length - 1];
@@ -1044,15 +1283,29 @@ var A2AApp = class A2AApp {
 
     // [Phase 6: Data Materialization]
     const phase6Tag = "[Phase 6: Data Materialization]";
-    console.log(`${phase6Tag} Isolating textual structural outcomes and physical blobs.`);
+    console.log(
+      `${phase6Tag} Isolating textual structural outcomes and physical blobs.`,
+    );
     let finalResults = results.map((o) => {
       const type = o.type;
       if (type === "text") {
-        this.addLog_(new Date(), phase6Tag, null, `${this.contextType} internal`, "Result materialized as pure text.");
+        this.addLog_(
+          new Date(),
+          phase6Tag,
+          null,
+          `${this.contextType} internal`,
+          "Result materialized as pure text.",
+        );
         return o[type] || o.text;
       }
 
-      this.addLog_(new Date(), phase6Tag, null, `${this.contextType} internal`, "Result materialized as binary file content.");
+      this.addLog_(
+        new Date(),
+        phase6Tag,
+        null,
+        `${this.contextType} internal`,
+        "Result materialized as binary file content.",
+      );
       const data = o[type];
       let fileBlob;
       if (data?.bytes) {
@@ -1087,10 +1340,22 @@ var A2AApp = class A2AApp {
     if (strResults.length > 0) {
       if (strResults.length === 1 && finalResults.length === 1) {
         // Optimization: Skip unnecessary summarization if only one string outcome exists
-        this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "Bypassing extra synthesis step due to singular text outcome.");
+        this.addLog_(
+          new Date(),
+          phase7Tag,
+          null,
+          `${this.contextType} internal`,
+          "Bypassing extra synthesis step due to singular text outcome.",
+        );
         g.history = tempHistory;
       } else {
-        this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "Aggregating multiple textual blocks via LLM abstraction.");
+        this.addLog_(
+          new Date(),
+          phase7Tag,
+          null,
+          `${this.contextType} internal`,
+          "Aggregating multiple textual blocks via LLM abstraction.",
+        );
         const gg = new GeminiWithFiles({
           apiKey,
           model: this.model,
@@ -1110,11 +1375,23 @@ var A2AApp = class A2AApp {
         ];
       }
     } else {
-      this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, "No string components required synthesis.");
+      this.addLog_(
+        new Date(),
+        phase7Tag,
+        null,
+        `${this.contextType} internal`,
+        "No string components required synthesis.",
+      );
       g.history = tempHistory;
     }
 
-    this.addLog_(new Date(), phase7Tag, null, `${this.contextType} internal`, `Finalized payload synthesis completed: ${JSON.stringify(finalResults).substring(0, 1000)}`);
+    this.addLog_(
+      new Date(),
+      phase7Tag,
+      null,
+      `${this.contextType} internal`,
+      `Finalized payload synthesis completed: ${JSON.stringify(finalResults).substring(0, 1000)}`,
+    );
 
     console.log(`${phase7Tag} Completed.`);
     forDebug && toLog_("finalResults2", JSON.stringify(finalResults));
@@ -1153,7 +1430,7 @@ var A2AApp = class A2AApp {
   }
 
   /**
-   * Helper: Map JSON definitions as parameter endpoints appending uniformly.
+   * Helper: Map JSON definitions as parameter endpoints uniformly.
    * @private
    */
   addQueryParameters_(url, obj) {
