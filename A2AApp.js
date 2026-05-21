@@ -26,9 +26,15 @@ const toLog_ = (kind, text) => {
  * const app = new A2AApp({ model: "models/gemini-3-flash-preview" });
  * app.setServices({ lock: LockService.getScriptLock() });
  * 
+ * // --- Chat History Example ---
+ * app.setHistory([
+ *   { role: "user", parts: [{ text: "Hello, remember that I like apples." }] },
+ *   { role: "model", parts: [{ text: "I will remember that you like apples." }] }
+ * ]);
+ * 
  * const response = app.client({
  *   apiKey: "YOUR_GEMINI_API_KEY",
- *   prompt: "Ask the secure agent about the current server status.",
+ *   prompt: "Ask the agent what my favorite fruit is.",
  *   agentCardUrls: agentCardUrls
  * });
  * console.log(response.result);
@@ -45,11 +51,11 @@ const toLog_ = (kind, text) => {
  * - [Phase 4: Planning] Gemini acts as a delegator to determine sequential routing.
  * - [Phase 5: Sequential Execution] Executing functions sequentially with forced routing.
  * - [Phase 6: Data Materialization] Isolating textual output from file blobs.
- * - [Phase 7: Final Synthesis] Generating the ultimate summarized response.
+ * - [Phase 7: Final Synthesis] Generating the ultimate summarized response and Clean History.
  *
  * Author: Kanshi Tanaike
  * Refactored by: Senior Generative AI & MCP Expert
- * Version: 2.3.0
+ * Version: 2.6.0 (Clean History Optimization)
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -84,6 +90,9 @@ var A2AApp = class A2AApp {
 
     /** @private Context flag to dynamically adjust log direction values ("server" or "client") */
     this.contextType = "unknown";
+    
+    /** @private Chat history initialized array */
+    this.history = [];
 
     if (this.log) {
       const ss = spreadsheetId
@@ -162,6 +171,30 @@ var A2AApp = class A2AApp {
       this.properties = properties;
     }
     return this;
+  }
+
+  /**
+   * Sets the conversation history for the agent.
+   * This allows the agent to maintain context across multiple interactions in a chat environment.
+   *
+   * @param {Array<Object>} history - An array of history objects containing 'role' and 'parts'.
+   * @returns {A2AApp} This agent instance for chaining.
+   */
+  setHistory(history) {
+    if (!Array.isArray(history)) {
+      throw new Error("CRITICAL: History must be an array of objects compatible with GeminiWithFiles.");
+    }
+    this.history = history;
+    return this;
+  }
+
+  /**
+   * Retrieves the current conversation history.
+   *
+   * @returns {Array<Object>} The current history array.
+   */
+  getHistory() {
+    return this.history || [];
   }
 
   /**
@@ -264,12 +297,18 @@ var A2AApp = class A2AApp {
 
     try {
       // [Phase 2: Agent Discovery] Fetch Agent Cards
-      const { agentCardUrls = [], agentCards = [] } = object;
+      const { agentCardUrls = [], agentCards = [], history = this.history || [] } = object;
+      object.history = history;
       if (agentCards.length === 0 && agentCardUrls.length > 0) {
         object.agentCards = this.getAgentCards(agentCardUrls);
       }
 
       const res = this.processAgents_(object);
+      
+      // Safe History Updating
+      if (res && res.history) {
+        this.history = res.history; 
+      }
       this.log_();
       return res;
     } catch (err) {
@@ -459,18 +498,27 @@ var A2AApp = class A2AApp {
 
       try {
         const { params } = obj;
-        const { message } = params;
+        const { message, history: clientHistory = [] } = params;
         const prompt = message?.parts?.[0]?.text || "";
 
         // Trigger the internal orchestration logic on the server side
-        const { result, history } = this.processAgents_({
+        const orchestrationRes = this.processAgents_({
           apiKey,
           prompt,
+          history: clientHistory,
           functions: functions(),
           fileAsBlob: true,
           agentCards,
         });
 
+        // Guard against internal orchestration failures (e.g., LLM planning crash)
+        if (orchestrationRes.error) {
+          const errMsg = orchestrationRes.error.message || "Internal server orchestration error.";
+          console.error(`--- Server Process Error: ${errMsg}`);
+          return this.createErrorResponse_(errMsg, id, method);
+        }
+
+        const { result, history } = orchestrationRes;
         const artifacts = [];
         const messageParts = [];
 
@@ -513,6 +561,7 @@ var A2AApp = class A2AApp {
                   messageId: params.messageId,
                   parts: messageParts,
                   role: "agent",
+                  history: history, // Provide updated CLEAN history state back to client
                 },
                 id,
               }
@@ -528,6 +577,7 @@ var A2AApp = class A2AApp {
                     timestamp: new Date().toISOString(),
                   },
                   artifacts,
+                  history: history, // Provide updated CLEAN history state back to client
                 },
                 id,
               };
@@ -604,7 +654,7 @@ var A2AApp = class A2AApp {
    * Incorporates detailed logging wrappers for introspection and injects custom headers for authenticated routing.
    * @private
    */
-  getClientFunctions_(agentCards, addedFunctions) {
+  getClientFunctions_(agentCards, addedFunctions, history = []) {
     const phaseTag = "[Phase 3: Tool Proxying]";
     console.log(`${phaseTag} Initiated capabilities mapping.`);
     this.addLog_(
@@ -724,6 +774,7 @@ var A2AApp = class A2AApp {
               sessionId: id3,
               message: { role: "user", parts: [{ type: "text", text: task }] },
               acceptedOutputModes: ["text", "text/plain"],
+              history: history, // Injects context state natively into remote protocol requests
             },
           };
 
@@ -949,6 +1000,7 @@ var A2AApp = class A2AApp {
     const createdFunctions = this.getClientFunctions_(
       agentCards,
       addedFunctions,
+      history
     );
 
     // [Phase 4: Planning]
@@ -1059,7 +1111,7 @@ var A2AApp = class A2AApp {
       const errObj = {
         error: {
           code: this.ErrorCode["Internal server error"],
-          message: "Internal server error. Try again.",
+          message: "Internal server error. Execution Order Generation Failed.",
         },
         jsonrpc: this.jsonrpc,
         id: null,
@@ -1347,7 +1399,6 @@ var A2AApp = class A2AApp {
           `${this.contextType} internal`,
           "Bypassing extra synthesis step due to singular text outcome.",
         );
-        g.history = tempHistory;
       } else {
         this.addLog_(
           new Date(),
@@ -1368,7 +1419,6 @@ var A2AApp = class A2AApp {
             { text: `<Answers>${strResults.join("\n")}</Answers>` },
           ],
         });
-        g.history = gg.history;
         finalResults = [
           res3,
           ...finalResults.filter((e) => typeof e !== "string"),
@@ -1382,7 +1432,6 @@ var A2AApp = class A2AApp {
         `${this.contextType} internal`,
         "No string components required synthesis.",
       );
-      g.history = tempHistory;
     }
 
     this.addLog_(
@@ -1396,7 +1445,29 @@ var A2AApp = class A2AApp {
     console.log(`${phase7Tag} Completed.`);
     forDebug && toLog_("finalResults2", JSON.stringify(finalResults));
 
-    return { result: finalResults, history: g.history, agentCards };
+    // [Refactoring: Clean History Construction]
+    // Eliminate massive internal intermediate LLM reasoning steps (functionCall, thoughtSignature, etc.) from the propagated history.
+    this.addLog_(
+      new Date(),
+      phase7Tag,
+      null,
+      `${this.contextType} internal`,
+      "Constructing clean history to prevent token bloat.",
+    );
+
+    const historyAnswerText = finalResults
+      .map((e) => (typeof e === "string" ? e : "[Binary Data]"))
+      .join("\n");
+
+    const cleanHistory = [...history];
+    if (prompt) {
+      cleanHistory.push({ role: "user", parts: [{ text: prompt }] });
+    }
+    if (historyAnswerText) {
+      cleanHistory.push({ role: "model", parts: [{ text: historyAnswerText }] });
+    }
+
+    return { result: finalResults, history: cleanHistory, agentCards };
   }
 
   /**

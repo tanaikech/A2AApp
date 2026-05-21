@@ -436,4 +436,7 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 - v2.3.0 (May 19, 2026)
   1. `const agentCardUrls = ["https://public.agent.com",{ "secure-agent": { "httpUrl": "https://secure.agent.com", "headers": { "X-Agent-Key": "my-secret" } } }]` can be used for using A2A servers.
 
+- v2.6.0  (May 21, 2026)
+  1. Updated history.
+
 [TOP](#top)
