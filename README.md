@@ -205,6 +205,7 @@ A2AApp has the following options.
 - Also, in the case of the A2A client with Google Apps Script, it accesses the Web Apps of the A2A server with Google Apps Script using the access token. By this, even when "Who has access: Anyone with Google account" can be used as the setting. But, in that case, it is required to share the Google Apps Script projects. Please be careful about this.
 - A2AApp can also record a log. In this case, please set it as follows: `return new A2AApp({accessKey: "sample", log: true, spreadsheetId: "###"}).server(object);`. With this setting, the log is recorded in the Spreadsheet.
 - A2AApp server can also connect to other servers. For example, when an A2A server is connected to another server, please put the URLs of the servers in `agentCardUrls` of [A2A server 1_Google Sheets Manager Agent.js](https://github.com/tanaikech/A2AApp/blob/master/A2A%20server%201_Google%20Sheets%20Manager%20Agent.js). You can do this for the same for other servers. But, in the current stage, when Google Apps Script is used, I think that directly connecting an A2A client with multiple servers is better because of the process cost.
+- `directRouting` option is available for the client. When `directRouting: true` is specified in the client configuration, and `agentCards` (or `agentCardUrls`) resolves to a single card, the library bypasses the internal LLM mock planning orchestration phases to dispatch the JSON-RPC payload directly to the network layer, optimizing performance.
 
 # Summary
 
@@ -438,5 +439,8 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 
 - v2.6.0  (May 21, 2026)
   1. Updated history.
+
+- v2.7.0 (June 7, 2026)
+  1. Added `directRouting` option to bypass LLM orchestration for direct routing when a single target agent card is resolved.
 
 [TOP](#top)

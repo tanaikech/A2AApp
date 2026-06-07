@@ -15,23 +15,23 @@ const toLog_ = (kind, text) => {
 /**
  * Class object for A2AApp.
  * This is used for building both an Agent2Agent (A2A) server and an A2A client with Google Apps Script.
- * 
+ *
  * ### Usage Example
  * ```javascript
  * const agentCardUrls = [
  *   "https://public.agent.com",
  *   { "secure-agent": { "httpUrl": "https://secure.agent.com", "headers": { "X-Agent-Key": "my-secret" } } }
  * ];
- * 
+ *
  * const app = new A2AApp({ model: "models/gemini-3-flash-preview" });
  * app.setServices({ lock: LockService.getScriptLock() });
- * 
+ *
  * // --- Chat History Example ---
  * app.setHistory([
  *   { role: "user", parts: [{ text: "Hello, remember that I like apples." }] },
  *   { role: "model", parts: [{ text: "I will remember that you like apples." }] }
  * ]);
- * 
+ *
  * const response = app.client({
  *   apiKey: "YOUR_GEMINI_API_KEY",
  *   prompt: "Ask the agent what my favorite fruit is.",
@@ -55,7 +55,7 @@ const toLog_ = (kind, text) => {
  *
  * Author: Kanshi Tanaike
  * Refactored by: Senior Generative AI & MCP Expert
- * Version: 2.6.0 (Clean History Optimization)
+ * Version: 2.7.0 (Direct JSON-RPC Bypass Optimization)
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -90,7 +90,7 @@ var A2AApp = class A2AApp {
 
     /** @private Context flag to dynamically adjust log direction values ("server" or "client") */
     this.contextType = "unknown";
-    
+
     /** @private Chat history initialized array */
     this.history = [];
 
@@ -182,7 +182,9 @@ var A2AApp = class A2AApp {
    */
   setHistory(history) {
     if (!Array.isArray(history)) {
-      throw new Error("CRITICAL: History must be an array of objects compatible with GeminiWithFiles.");
+      throw new Error(
+        "CRITICAL: History must be an array of objects compatible with GeminiWithFiles.",
+      );
     }
     this.history = history;
     return this;
@@ -297,17 +299,33 @@ var A2AApp = class A2AApp {
 
     try {
       // [Phase 2: Agent Discovery] Fetch Agent Cards
-      const { agentCardUrls = [], agentCards = [], history = this.history || [] } = object;
+      const {
+        agentCardUrls = [],
+        agentCards = [],
+        history = this.history || [],
+        directRouting = false,
+      } = object;
       object.history = history;
       if (agentCards.length === 0 && agentCardUrls.length > 0) {
         object.agentCards = this.getAgentCards(agentCardUrls);
       }
 
-      const res = this.processAgents_(object);
-      
+      let res;
+      // [Optimization v2.7.0]: If directRouting is flagged (via LlmAgent), cleanly bypass ALL LLM Mock Orchestration
+      // and directly dispatch the JSON-RPC to the network layer.
+      if (
+        directRouting &&
+        object.agentCards &&
+        object.agentCards.length === 1
+      ) {
+        res = this.dispatchDirectRPC_(object);
+      } else {
+        res = this.processAgents_(object);
+      }
+
       // Safe History Updating
       if (res && res.history) {
-        this.history = res.history; 
+        this.history = res.history;
       }
       this.log_();
       return res;
@@ -513,7 +531,9 @@ var A2AApp = class A2AApp {
 
         // Guard against internal orchestration failures (e.g., LLM planning crash)
         if (orchestrationRes.error) {
-          const errMsg = orchestrationRes.error.message || "Internal server orchestration error.";
+          const errMsg =
+            orchestrationRes.error.message ||
+            "Internal server orchestration error.";
           console.error(`--- Server Process Error: ${errMsg}`);
           return this.createErrorResponse_(errMsg, id, method);
         }
@@ -650,6 +670,137 @@ var A2AApp = class A2AApp {
   }
 
   /**
+   * [Direct Routing: Fast-Track JSON-RPC Dispatcher]
+   * Radically optimized pipeline for execution when an Orchestrator explicitly assigns a specific target card.
+   * Discards the massive overhead of Phase 3 to 7 LLM proxy emulation logic.
+   * @private
+   */
+  dispatchDirectRPC_(object) {
+    const { apiKey, prompt, agentCards, history = [] } = object;
+    const targetAgent = agentCards[0];
+
+    const phaseTag = "[Direct Routing: Fast-Track JSON-RPC]";
+    console.log(
+      `${phaseTag} Bypassing internal LLM orchestration to dispatch natively.`,
+    );
+    this.addLog_(
+      new Date(),
+      phaseTag,
+      null,
+      "client internal",
+      `Target Agent Resolved: ${targetAgent.name || "Unknown Agent"}`,
+    );
+
+    const id1 = Utilities.newBlob(new Date().getTime().toString())
+      .getBytes()
+      .map((byte) => ("0" + (byte & 0xff).toString(16)).slice(-2))
+      .join("");
+    const id2 = Utilities.getUuid();
+    const id3 = Utilities.getUuid();
+
+    const resObj = {
+      jsonrpc: this.jsonrpc,
+      id: id1,
+      method: "tasks/send",
+      params: {
+        id: id2,
+        sessionId: id3,
+        message: {
+          role: "user",
+          parts: [{ type: "text", text: prompt }],
+        },
+        acceptedOutputModes: ["text", "text/plain"],
+        history: history,
+      },
+    };
+
+    const combinedHeaders = {
+      ...this.headers,
+      ...(targetAgent.customHeaders || {}),
+    };
+
+    const req = {
+      url: targetAgent.url,
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(resObj),
+      headers: combinedHeaders,
+      muteHttpExceptions: true,
+    };
+
+    console.log(`${phaseTag} Dispatching request to: ${req.url}`);
+    this.addLog_(
+      new Date(),
+      phaseTag,
+      null,
+      "client --> server",
+      `JSON-RPC Payload dispatched.`,
+    );
+
+    const re = UrlFetchApp.fetch(req.url, req);
+    const code = re.getResponseCode();
+    const body = re.getContentText();
+
+    console.log(`${phaseTag} Remote agent responded with HTTP Code: ${code}`);
+    this.addLog_(
+      new Date(),
+      phaseTag,
+      null,
+      "server --> client",
+      `Code: ${code}, Body: ${body.substring(0, 1500)}`,
+    );
+
+    let results = [];
+    if (code === 200) {
+      try {
+        const oo = JSON.parse(body);
+        if (oo.result && oo.result.status?.state === "completed") {
+          const sArtifacts = (oo.result.artifacts || []).flatMap(
+            ({ parts }) => parts,
+          );
+          const messageParts = oo.result.status.message?.parts || [];
+
+          const uniqueTexts = new Set();
+          const m = [...messageParts, ...sArtifacts].filter((part) => {
+            if (part.type === "text") {
+              const txt = part.text || "";
+              if (uniqueTexts.has(txt)) return false;
+              uniqueTexts.add(txt);
+            }
+            return true;
+          });
+
+          results = m.map((part) => part.text || part);
+        } else if (oo.error) {
+          results.push(
+            `Error: Remote agent returned error: ${JSON.stringify(oo.error)}`,
+          );
+        } else {
+          results.push(`Error: Invalid response structure. Body: ${body}`);
+        }
+      } catch (e) {
+        results.push(`Error: Failed to parse JSON response. Body: ${body}`);
+      }
+    } else {
+      results.push(`Error: Remote agent returned HTTP ${code}. Body: ${body}`);
+    }
+
+    const historyAnswerText = results
+      .map((e) => (typeof e === "string" ? e : "[Binary Data]"))
+      .join("\n");
+    const cleanHistory = [...history];
+    if (prompt) cleanHistory.push({ role: "user", parts: [{ text: prompt }] });
+    if (historyAnswerText)
+      cleanHistory.push({
+        role: "model",
+        parts: [{ text: historyAnswerText }],
+      });
+
+    console.log(`${phaseTag} Sequence completed successfully.`);
+    return { result: results, history: cleanHistory, agentCards };
+  }
+
+  /**
    * [Phase 3: Tool Proxying] Prepare client-side functions inclusive of remote agents.
    * Incorporates detailed logging wrappers for introspection and injects custom headers for authenticated routing.
    * @private
@@ -699,117 +850,122 @@ var A2AApp = class A2AApp {
 
     // Integrate Discovered AI agents via dynamic schema proxying
     if (agentCards.length > 0) {
-      agentCards.forEach(({ name, description, url, provider, skills, customHeaders = {} }) => {
-        // Add 'customType_' prefix to intentionally bypass GeminiWithFiles automatic loop execution.
-        const safeName = "customType_" + name.replace(/ /g, "_");
-        const skillStr = skills
-          .map((o) => {
-            const name = o.name || "no name";
-            const description = o.description || "no description";
-            const examples =
-              o.examples && o.examples.length > 0
-                ? o.examples.join(", ")
-                : "no examples";
+      agentCards.forEach(
+        ({ name, description, url, provider, skills, customHeaders = {} }) => {
+          // Add 'customType_' prefix to intentionally bypass GeminiWithFiles automatic loop execution.
+          const safeName = "customType_" + name.replace(/ /g, "_");
+          const skillStr = skills
+            .map((o) => {
+              const name = o.name || "no name";
+              const description = o.description || "no description";
+              const examples =
+                o.examples && o.examples.length > 0
+                  ? o.examples.join(", ")
+                  : "no examples";
 
-            return `id: ${o.id}, name: ${name}, description: ${description}, examples: ${examples}`;
-          })
-          .join(" | ");
+              return `id: ${o.id}, name: ${name}, description: ${description}, examples: ${examples}`;
+            })
+            .join(" | ");
 
-        funcs.params_[safeName] = {
-          description: [
-            `Agent name: ${safeName}`,
-            `Description: ${description}`,
-            `URL: ${url}`,
-            `Skills: ${skillStr}`,
-            provider
-              ? `Provider: ${provider.organization}, ${provider.url}`
-              : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          parameters: {
-            type: "object",
-            properties: {
-              agent_name: {
-                type: "string",
-                description: "Agent name you selected.",
-              },
-              agent_url: { type: "string", description: "URL of the agent." },
-              task: {
-                type: "string",
-                description:
-                  "Details of task. Give the suitable task to this agent.",
-              },
-            },
-            required: ["agent_name", "agent_url", "task"],
-          },
-        };
-
-        // Define proxy facade to safely remote trigger specific capabilities
-        funcs[safeName] = (args) => {
-          const { agent_name, agent_url, task } = args;
-          const msgCall = `Agent Call proxy invoked: "${agent_name}" | Assigned Task: "${task}" | URL: ${agent_url}`;
-          console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
-          this.addLog_(
-            new Date(),
-            "[Phase 5: Sequential Execution]",
-            null,
-            `${this.contextType} internal`,
-            msgCall,
-          );
-
-          const id1 = Utilities.newBlob(new Date().getTime().toString())
-            .getBytes()
-            .map((byte) => ("0" + (byte & 0xff).toString(16)).slice(-2))
-            .join("");
-          const id2 = Utilities.getUuid();
-          const id3 = Utilities.getUuid();
-
-          const resObj = {
-            jsonrpc: this.jsonrpc,
-            id: id1,
-            method: "tasks/send",
-            params: {
-              id: id2,
-              sessionId: id3,
-              message: { role: "user", parts: [{ type: "text", text: task }] },
-              acceptedOutputModes: ["text", "text/plain"],
-              history: history, // Injects context state natively into remote protocol requests
-            },
-          };
-
-          this.addLog_(
-            new Date(),
-            "[Phase 5: Sequential Execution]",
-            null,
-            "client --> server",
-            `JSON-RPC Payload created: ${JSON.stringify(resObj)}`,
-          );
-
-          // Apply specific custom headers dynamically extracted from the normalization sequence
-          const combinedHeaders = { ...this.headers, ...customHeaders };
-
-          // Wrap response in 'items' pattern to enforce the immediate bypass strategy
-          // and forcefully specify 'method' and 'contentType' to avoid invalid generic GET requests.
-          return {
-            items: {
-              functionResponse: {
-                request: {
-                  url: agent_url,
-                  method: "post",
-                  contentType: "application/json",
-                  payload: JSON.stringify(resObj),
-                  headers: combinedHeaders,
-                  muteHttpExceptions: true,
+          funcs.params_[safeName] = {
+            description: [
+              `Agent name: ${safeName}`,
+              `Description: ${description}`,
+              `URL: ${url}`,
+              `Skills: ${skillStr}`,
+              provider
+                ? `Provider: ${provider.organization}, ${provider.url}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            parameters: {
+              type: "object",
+              properties: {
+                agent_name: {
+                  type: "string",
+                  description: "Agent name you selected.",
                 },
-                resObj,
-                name: safeName,
-                argsObj: args,
+                agent_url: { type: "string", description: "URL of the agent." },
+                task: {
+                  type: "string",
+                  description:
+                    "Details of task. Give the suitable task to this agent.",
+                },
               },
+              required: ["agent_name", "agent_url", "task"],
             },
           };
-        };
-      });
+
+          // Define proxy facade to safely remote trigger specific capabilities
+          funcs[safeName] = (args) => {
+            const { agent_name, agent_url, task } = args;
+            const msgCall = `Agent Call proxy invoked: "${agent_name}" | Assigned Task: "${task}" | URL: ${agent_url}`;
+            console.log(`[Phase 5: Sequential Execution] ${msgCall}`);
+            this.addLog_(
+              new Date(),
+              "[Phase 5: Sequential Execution]",
+              null,
+              `${this.contextType} internal`,
+              msgCall,
+            );
+
+            const id1 = Utilities.newBlob(new Date().getTime().toString())
+              .getBytes()
+              .map((byte) => ("0" + (byte & 0xff).toString(16)).slice(-2))
+              .join("");
+            const id2 = Utilities.getUuid();
+            const id3 = Utilities.getUuid();
+
+            const resObj = {
+              jsonrpc: this.jsonrpc,
+              id: id1,
+              method: "tasks/send",
+              params: {
+                id: id2,
+                sessionId: id3,
+                message: {
+                  role: "user",
+                  parts: [{ type: "text", text: task }],
+                },
+                acceptedOutputModes: ["text", "text/plain"],
+                history: history, // Injects context state natively into remote protocol requests
+              },
+            };
+
+            this.addLog_(
+              new Date(),
+              "[Phase 5: Sequential Execution]",
+              null,
+              "client --> server",
+              `JSON-RPC Payload created: ${JSON.stringify(resObj)}`,
+            );
+
+            // Apply specific custom headers dynamically extracted from the normalization sequence
+            const combinedHeaders = { ...this.headers, ...customHeaders };
+
+            // Wrap response in 'items' pattern to enforce the immediate bypass strategy
+            // and forcefully specify 'method' and 'contentType' to avoid invalid generic GET requests.
+            return {
+              items: {
+                functionResponse: {
+                  request: {
+                    url: agent_url,
+                    method: "post",
+                    contentType: "application/json",
+                    payload: JSON.stringify(resObj),
+                    headers: combinedHeaders,
+                    muteHttpExceptions: true,
+                  },
+                  resObj,
+                  name: safeName,
+                  argsObj: args,
+                },
+              },
+            };
+          };
+        },
+      );
     }
 
     // Merge User's custom defined implementations with interceptors for granular logging
@@ -889,18 +1045,24 @@ var A2AApp = class A2AApp {
     }
 
     // Normalize inputs separating clean string paths and embedded object configurations
-    const normalizedUrls = agentCardUrls.map(item => {
-      if (typeof item === 'string' && item.trim() !== '') {
-        return { url: item.trim(), headers: {}, original: item };
-      } else if (typeof item === 'object' && item !== null) {
-        const key = Object.keys(item)[0];
-        const val = item[key];
-        if (val && val.httpUrl) {
-          return { url: val.httpUrl.trim(), headers: val.headers || {}, original: item };
+    const normalizedUrls = agentCardUrls
+      .map((item) => {
+        if (typeof item === "string" && item.trim() !== "") {
+          return { url: item.trim(), headers: {}, original: item };
+        } else if (typeof item === "object" && item !== null) {
+          const key = Object.keys(item)[0];
+          const val = item[key];
+          if (val && val.httpUrl) {
+            return {
+              url: val.httpUrl.trim(),
+              headers: val.headers || {},
+              original: item,
+            };
+          }
         }
-      }
-      return null;
-    }).filter(Boolean);
+        return null;
+      })
+      .filter(Boolean);
 
     if (normalizedUrls.length === 0) {
       console.warn(`${phaseTag} No valid agent cards configurations parsed.`);
@@ -947,7 +1109,7 @@ var A2AApp = class A2AApp {
           const o = JSON.parse(res.getContentText());
           o.url = o.url || normalizedUrls[i].url;
           o.customHeaders = normalizedUrls[i].headers; // Inject mapping context downstream
-          
+
           if (o.name) {
             o.name = o.name.replace(/ /g, "_");
           }
@@ -1000,7 +1162,7 @@ var A2AApp = class A2AApp {
     const createdFunctions = this.getClientFunctions_(
       agentCards,
       addedFunctions,
-      history
+      history,
     );
 
     // [Phase 4: Planning]
@@ -1094,7 +1256,8 @@ var A2AApp = class A2AApp {
     g.history = [...history, ...(g.history || [])];
 
     const textPrompt = `User's prompt is as follows.\n<UserPrompt>${prompt}</UserPrompt>`;
-    const orderAr = g.generateContent({ q: textPrompt });
+    const orderArTemp = g.generateContent({ q: textPrompt });
+    const orderAr = Array.isArray(orderArTemp) ? orderArTemp : [];
 
     const msgOrder = `Determined Execution Order: ${JSON.stringify(orderAr)}`;
     console.log(`${phase4Tag} ${msgOrder}`);
@@ -1464,7 +1627,10 @@ var A2AApp = class A2AApp {
       cleanHistory.push({ role: "user", parts: [{ text: prompt }] });
     }
     if (historyAnswerText) {
-      cleanHistory.push({ role: "model", parts: [{ text: historyAnswerText }] });
+      cleanHistory.push({
+        role: "model",
+        parts: [{ text: historyAnswerText }],
+      });
     }
 
     return { result: finalResults, history: cleanHistory, agentCards };
