@@ -55,7 +55,7 @@ const toLog_ = (kind, text) => {
  *
  * Author: Kanshi Tanaike
  * Refactored by: Senior Generative AI & MCP Expert
- * Version: 2.7.0 (Direct JSON-RPC Bypass Optimization)
+ * Version: 2.8.0 (Direct JSON-RPC Bypass Optimization & Dynamic Logging Routing)
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -98,8 +98,10 @@ var A2AApp = class A2AApp {
       const ss = spreadsheetId
         ? SpreadsheetApp.openById(spreadsheetId)
         : SpreadsheetApp.create("Log_A2AApp");
+      const targetSheetName = spreadsheetId ? "A2A" : "log";
+      const headers = ["Date", "Phase/Method", "ID", "Direction", "Message"];
       /** @private */
-      this.sheet = ss.getSheetByName("log") || ss.insertSheet("log");
+      this.sheet = this._getOrCreateSheet(ss, targetSheetName, headers);
     }
 
     /** @private */
@@ -152,6 +154,40 @@ var A2AApp = class A2AApp {
     this.lock = this.lock || LockService.getScriptLock();
     this.properties =
       this.properties || PropertiesService.getScriptProperties();
+  }
+
+  /**
+   * Safely gets or creates a sheet under a script lock to prevent concurrency errors.
+   * @private
+   * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss - The spreadsheet object.
+   * @param {string} name - The sheet name.
+   * @param {Array<string>} headers - Headers to add if creating.
+   * @return {GoogleAppsScript.Spreadsheet.Sheet}
+   */
+  _getOrCreateSheet(ss, name, headers) {
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      const lock = LockService.getScriptLock();
+      let lockAcquired = false;
+      try {
+        lockAcquired = lock.tryLock(15000);
+        sheet = ss.getSheetByName(name);
+        if (!sheet) {
+          sheet = ss.insertSheet(name);
+          if (headers && headers.length > 0) {
+            sheet.appendRow(headers);
+            sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+          }
+        }
+      } catch (e) {
+        sheet = ss.getSheetByName(name) || ss.getSheets()[0];
+      } finally {
+        if (lockAcquired) {
+          lock.releaseLock();
+        }
+      }
+    }
+    return sheet;
   }
 
   /**
@@ -277,7 +313,9 @@ var A2AApp = class A2AApp {
         "[Phase 1: Concurrency Control] Timeout. Lock could not be acquired.";
       console.error(msg);
       const errObj = {
-        error: { message: `Internal server error. Error message: ${msg}` },
+        error: {
+          message: `[A2A Client Error] Internal server error. Error message: ${msg}`,
+        },
       };
       this.addLog_(
         new Date(),
@@ -333,7 +371,7 @@ var A2AApp = class A2AApp {
       console.error(err.stack);
       const errObj = {
         error: {
-          message: `Internal server error. Error message: ${err.stack}`,
+          message: `[A2A Client Error] Internal server error. Error message: ${err.stack}`,
         },
       };
       this.addLog_(
@@ -386,7 +424,10 @@ var A2AApp = class A2AApp {
   createErrorResponse_(message, id, phaseOrMethod) {
     const errObj = {
       jsonrpc: this.jsonrpc,
-      error: { code: this.ErrorCode["Internal server error"], message },
+      error: {
+        code: this.ErrorCode["Internal server error"],
+        message: `[A2A Server Error] ${message}`,
+      },
       id,
     };
     this.addLog_(
@@ -429,7 +470,9 @@ var A2AApp = class A2AApp {
         "Received request for Agent Card.",
       );
       if (typeof agentCard !== "function") {
-        throw new Error("Agent card was not found or is not a function.");
+        throw new Error(
+          "[A2A Server Error] Agent card was not found or is not a function.",
+        );
       }
       const agentCardObj = agentCard();
 
@@ -490,7 +533,7 @@ var A2AApp = class A2AApp {
         jsonrpc: this.jsonrpc,
         error: {
           code: this.ErrorCode["Authorization failed"],
-          message: `Authorization failed. ${errMsg}`,
+          message: `[A2A Server Error] Authorization failed. ${errMsg}`,
         },
         id,
       };
@@ -1274,7 +1317,8 @@ var A2AApp = class A2AApp {
       const errObj = {
         error: {
           code: this.ErrorCode["Internal server error"],
-          message: "Internal server error. Execution Order Generation Failed.",
+          message:
+            "[A2A Client Error] Internal server error. Execution Order Generation Failed.",
         },
         jsonrpc: this.jsonrpc,
         id: null,

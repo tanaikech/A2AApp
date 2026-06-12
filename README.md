@@ -443,4 +443,11 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
 - v2.7.0 (June 7, 2026)
   1. Added `directRouting` option to bypass LLM orchestration for direct routing when a single target agent card is resolved.
 
+- v2.8.0 (June 12, 2026)
+  1. Added script lock protection during log sheet creation (`_getOrCreateSheet`) to prevent concurrency errors.
+  2. Dynamically routed log sheets: uses "A2A" if `spreadsheetId` is provided, otherwise "log".
+  3. Added header row formatting with bold style for newly created log sheets.
+  4. Enhanced error formatting with `[A2A Client Error]` and `[A2A Server Error]` prefixes to improve debugging and issue identification.
+
 [TOP](#top)
+
