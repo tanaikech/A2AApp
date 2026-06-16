@@ -4,6 +4,11 @@ To build an A2A network, you'll need to create several clients and servers. Usin
 
 ---
 
+🚀 **A2AApp is officially integrated with [GASADK (adk-gas)](https://github.com/tanaikech/adk-gas)!**  
+GASADK (Google Apps Script Agent Development Kit) allows you to build, manage, and connect various AI Agents under the A2A protocol effortlessly. Using A2AApp alongside GASADK empowers your agents to communicate, collaborate, and execute complex workflows seamlessly.
+
+---
+
 ### Library Project Key
 
 ```
@@ -59,3 +64,39 @@ const res = new A2AApp({ accessKey: "sample" }).server(object);
 ```javascript
 const res = new A2AApp.a2aApp({ accessKey: "sample" }).setServices({ lock: LockService.getScriptLock() }).server(object);
 ```
+
+---
+
+## Global Functions Exposed by the Library
+
+When using A2AApp as a library (using the library name `A2AApp`), the following global functions are exposed and can be used to control the internal `A2AApp` instance.
+
+### `a2aApp(object)`
+Initializes and returns the `A2AApp` instance.
+- `object`: Configuration object passed to the `A2AApp` constructor.
+
+### `setServices(services)`
+Sets script lock and properties services.
+- `services.lock` (Lock): Script lock instance.
+- `services.properties` (Properties): Script properties instance.
+
+### `server(object)`
+Handles A2A server-side requests.
+- `object`: Parameters including `eventObject`, `apiKey`, `agentCard`, and `functions`.
+
+### `client(object)`
+Runs A2A client orchestration.
+- `object`: Parameters including `apiKey`, `prompt`, `agentCardUrls`, and optionally `directRouting`.
+
+### `setHistory(history)`
+Sets the conversation history state.
+- `history`: Array of chat history blocks.
+
+### `getHistory()`
+Retrieves the current conversation history.
+
+### `getAgentCards(agentCardUrls)`
+Retrieves and parses agent cards from target URLs.
+
+### `getClientIndex()`
+Returns a pre-built `HtmlOutput` for the client UI.

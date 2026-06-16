@@ -2,6 +2,13 @@
 
 Enabling Collaborative Agent Systems through Google Apps Script-based Agent2Agent (A2A) Network
 
+---
+
+🚀 **A2AApp is officially integrated with [GASADK (adk-gas)](https://github.com/tanaikech/adk-gas)!**  
+GASADK (Google Apps Script Agent Development Kit) allows you to build, manage, and connect various AI Agents under the A2A protocol effortlessly. Using A2AApp alongside GASADK empowers your agents to communicate, collaborate, and execute complex workflows seamlessly.
+
+---
+
 <a name="top"></a>
 [![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENCE)
 
@@ -206,6 +213,56 @@ A2AApp has the following options.
 - A2AApp can also record a log. In this case, please set it as follows: `return new A2AApp({accessKey: "sample", log: true, spreadsheetId: "###"}).server(object);`. With this setting, the log is recorded in the Spreadsheet.
 - A2AApp server can also connect to other servers. For example, when an A2A server is connected to another server, please put the URLs of the servers in `agentCardUrls` of [A2A server 1_Google Sheets Manager Agent.js](https://github.com/tanaikech/A2AApp/blob/master/A2A%20server%201_Google%20Sheets%20Manager%20Agent.js). You can do this for the same for other servers. But, in the current stage, when Google Apps Script is used, I think that directly connecting an A2A client with multiple servers is better because of the process cost.
 - `directRouting` option is available for the client. When `directRouting: true` is specified in the client configuration, and `agentCards` (or `agentCardUrls`) resolves to a single card, the library bypasses the internal LLM mock planning orchestration phases to dispatch the JSON-RPC payload directly to the network layer, optimizing performance.
+
+## Methods of A2AApp Class
+
+### Constructor
+```javascript
+const app = new A2AApp(options);
+```
+- `options.accessKey` (String): Access key for authentication (optional).
+- `options.log` (Boolean): Enable/disable logging to a Google Spreadsheet (default: `false`).
+- `options.spreadsheetId` (String): ID of the Google Spreadsheet to record logs.
+- `options.model` (String): Gemini model name (default: `"models/gemini-3-flash-preview"`).
+
+### Methods
+
+#### `setServices(services)`
+Sets Google Apps Script services dependent on the script environment (e.g., `LockService` and `PropertiesService`).
+- `services.lock` (GoogleAppsScript.Lock.Lock): Lock service instance (e.g., `LockService.getScriptLock()`).
+- `services.properties` (GoogleAppsScript.Properties.Properties): Properties service instance (e.g., `PropertiesService.getScriptProperties()`).
+- **Returns**: `A2AApp` instance for chaining.
+
+#### `setHistory(history)`
+Sets the conversation history for maintaining context across chat interactions.
+- `history` (Array<Object>): List of Gemini-compatible history objects containing `role` and `parts`.
+- **Returns**: `A2AApp` instance for chaining.
+
+#### `getHistory()`
+Retrieves the current conversation history.
+- **Returns**: `Array<Object>`
+
+#### `getAgentCards(agentCardUrls)`
+Retrieves and parses agent cards from specified URLs.
+- `agentCardUrls` (Array<String|Object>): URLs or configuration objects pointing to remote agent cards.
+- **Returns**: `Array<Object>` parsed agent cards.
+
+#### `server(object)`
+Handles server-side A2A request flow (e.g., in `doPost(e)`).
+- `object.eventObject` (Object): Event object from Apps Script `doPost`/`doGet`.
+- `object.apiKey` (String): Gemini API Key.
+- `object.agentCard` (Function): Getter function returning the agent card object.
+- `object.functions` (Function): Getter function returning local functions for function calling.
+- **Returns**: `GoogleAppsScript.Content.TextOutput`
+
+#### `client(object)`
+Initiates A2A client orchestration and agent dispatching.
+- `object.apiKey` (String): Gemini API Key.
+- `object.prompt` (String): User's prompt.
+- `object.agentCardUrls` (Array<String|Object>): URLs of target A2A agents.
+- `object.agentCards` (Array<Object>): Pre-fetched agent cards (optional).
+- `object.directRouting` (Boolean): Bypasses LLM orchestration when a single agent card is targeted (default: `false`).
+- **Returns**: `Object` containing `{ result, history, agentCards }`.
 
 # Summary
 
