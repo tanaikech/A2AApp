@@ -223,7 +223,7 @@ const app = new A2AApp(options);
 - `options.accessKey` (String): Access key for authentication (optional).
 - `options.log` (Boolean): Enable/disable logging to a Google Spreadsheet (default: `false`).
 - `options.spreadsheetId` (String): ID of the Google Spreadsheet to record logs.
-- `options.model` (String): Gemini model name (default: `"models/gemini-3-flash-preview"`).
+- `options.model` (String): Gemini model name (default: `"models/gemini-3.1-flash-lite"`).
 
 ### Methods
 
@@ -505,6 +505,10 @@ Once the above steps are completed, access `http://0.0.0.0:12000/` or `http://lo
   2. Dynamically routed log sheets: uses "A2A" if `spreadsheetId` is provided, otherwise "log".
   3. Added header row formatting with bold style for newly created log sheets.
   4. Enhanced error formatting with `[A2A Client Error]` and `[A2A Server Error]` prefixes to improve debugging and issue identification.
+
+- v2.9.0 (June 24, 2026)
+  1. Upgraded default LLM model to `models/gemini-3.1-flash-lite`.
+  2. Integrated `GasHookManager` compatibility to support BeforeTool and AfterTool hook hooks, allowing pre-execution checks and post-execution response modifications.
 
 [TOP](#top)
 

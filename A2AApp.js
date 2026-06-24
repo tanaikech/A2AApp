@@ -23,7 +23,7 @@ const toLog_ = (kind, text) => {
  *   { "secure-agent": { "httpUrl": "https://secure.agent.com", "headers": { "X-Agent-Key": "my-secret" } } }
  * ];
  *
- * const app = new A2AApp({ model: "models/gemini-3-flash-preview" });
+ * const app = new A2AApp({ model: "models/gemini-3.1-flash-lite" });
  * app.setServices({ lock: LockService.getScriptLock() });
  *
  * // --- Chat History Example ---
@@ -55,7 +55,7 @@ const toLog_ = (kind, text) => {
  *
  * Author: Kanshi Tanaike
  * Refactored by: Senior Generative AI & MCP Expert
- * Version: 2.8.0 (Direct JSON-RPC Bypass Optimization & Dynamic Logging Routing)
+ * Version: 2.9.0 (Hooks System & Modern Model Update)
  * GitHub: https://github.com/tanaikech/A2AApp
  * @class
  */
@@ -65,7 +65,7 @@ var A2AApp = class A2AApp {
    * @param {String} [object.accessKey] Access key for A2A server (optional).
    * @param {Boolean} [object.log] Enable logging to Google Sheets (default: false).
    * @param {String} [object.spreadsheetId] Spreadsheet ID for logs.
-   * @param {String} [object.model] Model name (default: "models/gemini-3-flash-preview").
+   * @param {String} [object.model] Model name (default: "models/gemini-3.1-flash-lite").
    */
   constructor(object = {}) {
     const { accessKey = null, log = false, spreadsheetId, model } = object;
@@ -74,7 +74,7 @@ var A2AApp = class A2AApp {
     this.accessKey = accessKey;
 
     /** @private */
-    this.model = model || "models/gemini-3-flash-preview";
+    this.model = model || "models/gemini-3.1-flash-lite";
 
     /** @private */
     this.jsonrpc = "2.0";
@@ -718,7 +718,7 @@ var A2AApp = class A2AApp {
    * Discards the massive overhead of Phase 3 to 7 LLM proxy emulation logic.
    * @private
    */
-  dispatchDirectRPC_(object) {
+  dispatchDirectRPCInternal_(object) {
     const { apiKey, prompt, agentCards, history = [] } = object;
     const targetAgent = agentCards[0];
 
@@ -1296,6 +1296,7 @@ var A2AApp = class A2AApp {
       responseMimeType: "application/json",
       responseSchema,
     });
+    if (this.hookManager) g.setHookManager(this.hookManager);
     g.history = [...history, ...(g.history || [])];
 
     const textPrompt = `User's prompt is as follows.\n<UserPrompt>${prompt}</UserPrompt>`;
@@ -1368,6 +1369,7 @@ var A2AApp = class A2AApp {
           functionCallingConfig: { mode: "any", allowedFunctionNames: [name] },
         },
       });
+      if (this.hookManager) gg.setHookManager(this.hookManager);
 
       const q = [
         `Your task is as follows.`,
@@ -1619,6 +1621,7 @@ var A2AApp = class A2AApp {
           model: this.model,
           history: tempHistory,
         });
+        if (this.hookManager) gg.setHookManager(this.hookManager);
         const res3 = gg.generateContent({
           parts: [
             { text: `Summarize answers by considering the question.` },
@@ -1734,5 +1737,41 @@ var A2AApp = class A2AApp {
     return url.includes("?")
       ? `${url}&${queryString}`
       : `${url}?${queryString}`;
+  }
+
+  setHookManager(hookManager) {
+    this.hookManager = hookManager;
+    return this;
+  }
+
+  dispatchDirectRPC_(object) {
+    if (this.hookManager) {
+      const beforeToolRes = this.hookManager.execute("BeforeTool", {
+        toolName: (object && object.method) || "remote_call",
+        arguments: (object && object.params) || {},
+        source: "a2a_client"
+      });
+
+      if (beforeToolRes.decision === "deny") {
+        return {
+          result: `[Hook Blocked] Tool execution denied by BeforeTool hook. Reason: ${beforeToolRes.reason || "Unspecified"}`
+        };
+      }
+    }
+
+    let res = this.dispatchDirectRPCInternal_(object);
+
+    if (this.hookManager) {
+      const afterToolRes = this.hookManager.execute("AfterTool", {
+        toolName: (object && object.method) || "remote_call",
+        result: (res && res.result) || res,
+        source: "a2a_client"
+      });
+      if (afterToolRes.result !== undefined) {
+        res = { result: afterToolRes.result };
+      }
+    }
+
+    return res;
   }
 };
